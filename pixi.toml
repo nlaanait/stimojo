@@ -1,0 +1,14 @@
+[workspace]
+channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
+name = "stimojo"
+platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
+version = "0.1.0"
+
+
+[tasks]
+benchmark = "mojo run src/run_all_benchmarks.mojo"
+test_xzencoding = "mojo run -I src test/stimojo/test_xzencoding.mojo"
+test = { depends-on = ["test_xzencoding"] }
+
+[dependencies]
+mojo = "<1.0.0"

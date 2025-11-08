@@ -1,0 +1,29 @@
+load("//bazel:api.bzl", "mojo_binary", "mojo_library", "mojo_test")
+
+mojo_library(
+    name = "stimojo",
+    srcs = glob(["src/stimojo/*.mojo"]),
+    deps = [
+        "@mojo//:stdlib",
+    ],
+)
+
+mojo_binary(
+    name = "pauli_benchmark",
+    srcs = ["src/.mojo"],
+    deps = [
+        ":stimojo",
+        "@mojo//:stdlib",
+    ],
+)
+
+mojo_test(
+    name = "test_xzencoding",
+    srcs = [
+        "test/stimojo/test_xzencoding.mojo",
+    ],
+    deps = [
+        ":stimojo",
+        "@mojo//:stdlib",
+    ],
+)
