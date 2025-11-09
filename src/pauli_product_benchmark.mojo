@@ -4,24 +4,20 @@ import benchmark
 
 fn main() raises:
     var repeats = 1_000_000
-    var pauli_string_1 = "IXYZ"
-    var pauli_string_2 = "YZIX"
+    var pauli_string_1 = "IXYZ" * repeats
+    var pauli_string_2 = "YZIX" * repeats
     var p1 = XZEncoding(pauli_string_1)
     var p2 = XZEncoding(pauli_string_2)
 
-    var p3 = p1 * p2
-    print(String(p3))
+    print(
+        "Benchmark on taking products of Pauli strings with length={}".format(
+            len(pauli_string_1)
+        )
+    )
 
     @parameter
     fn bench() raises:
-        var p1 = XZEncoding(pauli_string_1 * repeats)
-        var p2 = XZEncoding(pauli_string_2 * repeats)
         _ = p1 * p2
 
     report = benchmark.run[bench](max_runtime_secs=5)
-    print(
-        "benchmark for XZEncoding:\nComputed products of {} Pauli Strings in"
-        .format(repeats * 4),
-        report.mean(benchmark.Unit.s),
-        "seconds",
-    )
+    report.print(unit=benchmark.Unit.s)
