@@ -6,7 +6,7 @@ alias simd_width = simd_width_of[DType.uint8]()
 alias int_type = DType.uint8
 
 
-struct XZEncoding(Copyable, Movable, Stringable):
+struct PauliString(Copyable, Movable, Stringable):
     var pauli_string: String
     var x: UnsafePointer[Scalar[DType.uint8]]
     var z: UnsafePointer[Scalar[DType.uint8]]
@@ -84,12 +84,14 @@ struct XZEncoding(Copyable, Movable, Stringable):
         else:
             # fall back on conditional
             for idx in range(self.n_ops):
-                if self.x[idx] == 0 and self.z[idx] == 0:
+                if x[idx] == 0 and z[idx] == 0:
                     str += "I"
-                elif self.x[idx] == 0 and self.z[idx] == 1:
+                elif x[idx] == 0 and z[idx] == 1:
                     str += "Z"
-                elif self.x[idx] == 1 and self.z[idx] == 1:
+                elif x[idx] == 1 and z[idx] == 1:
                     str += "Y"
+                elif x[idx] == 1 and z[idx] == 0:
+                    str += "X"
 
         result.destroy_pointee()
         result.free()
@@ -101,20 +103,39 @@ struct XZEncoding(Copyable, Movable, Stringable):
             return self.vec_to_string(self.x, self.z)
         return self.pauli_string
 
-    fn __mul__(self, other: XZEncoding) raises -> XZEncoding:
-        var x_prod = self.x.copy()
-        var z_prod = self.z.copy()
+    fn __mul__(self, other: PauliString) raises -> PauliString:
+        var x_prod = UnsafePointer[UInt8].alloc(self.n_ops)
+        var z_prod = UnsafePointer[UInt8].alloc(self.n_ops)
 
         @parameter
         fn compute_xor_vector[simd_width: Int](idx: Int):
-            var x_result = x_prod[idx] ^ other.x[idx]
-            var z_result = z_prod[idx] ^ other.z[idx]
+            var x_chunk = self.x.load[width=simd_width](idx)
+            var z_chunk = self.z.load[width=simd_width](idx)
+            var other_x_chunk = other.x.load[width=simd_width](idx)
+            var other_z_chunk = other.z.load[width=simd_width](idx)
+            var x_result = x_chunk ^ other_x_chunk
+            var z_result = z_chunk ^ other_z_chunk
             x_prod.store[width=simd_width](idx, x_result)
             z_prod.store[width=simd_width](idx, z_result)
 
         vectorize[compute_xor_vector, simd_width](self.n_ops)
         prod_str = self.vec_to_string(x_prod, z_prod)
-        return XZEncoding(prod_str)
+        return PauliString(prod_str)
+
+    fn prod(mut self, other: PauliString):
+        @parameter
+        fn compute_xor_vector[simd_width: Int](idx: Int):
+            var x_prod_chunk = self.x.load[width=simd_width](idx)
+            var z_prod_chunk = self.z.load[width=simd_width](idx)
+            var other_x_chunk = other.x.load[width=simd_width](idx)
+            var other_z_chunk = other.z.load[width=simd_width](idx)
+            var x_result = x_prod_chunk ^ other_x_chunk
+            var z_result = z_prod_chunk ^ other_z_chunk
+            self.x.store[width=simd_width](idx, x_result)
+            self.z.store[width=simd_width](idx, z_result)
+
+        vectorize[compute_xor_vector, simd_width](self.n_ops)
+        self.pauli_string = self.vec_to_string(self.x, self.z)
 
     fn __del__(deinit self):
         if self.x:

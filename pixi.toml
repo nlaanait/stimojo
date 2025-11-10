@@ -6,10 +6,10 @@ version = "0.1.0"
 
 
 [tasks]
-benchmark = "mojo run src/run_all_benchmarks.mojo"
-test_xzencoding = "mojo run -I src test/stimojo/test_xzencoding.mojo"
-tests = { depends-on = ["test_xzencoding"] }
-format = "mojo format ./src"
+benchmarks = "mojo run src/run_all_benchmarks.mojo"
+test_pauli = "mojo run -I src test/stimojo/test_pauli.mojo"
+tests = { depends-on = ["test_pauli"] }
+format = "mojo format ./src && mojo format ./test"
 
 [dependencies]
 mojo = "<1.0.0"

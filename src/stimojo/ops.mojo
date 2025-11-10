@@ -1,8 +1,8 @@
-from stimojo.xzencoding import XZEncoding
+from stimojo.pauli import PauliString
 
 
 # TODO: check for commutation
-fn commutes(p1: XZEncoding, p2: XZEncoding) -> Bool:
+fn commutes(p1: PauliString, p2: PauliString) -> Bool:
     return True
 
 
@@ -18,6 +18,6 @@ fn sort_into_commuting_groups(
 
 
 fn sort_into_commuting_groups(
-    pauli_encodings: List[XZEncoding],
-) -> List[List[XZEncoding]]:
+    pauli_encodings: List[PauliString],
+) -> List[List[PauliString]]:
     ...
