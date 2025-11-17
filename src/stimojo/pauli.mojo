@@ -1,6 +1,8 @@
 from algorithm import parallelize, vectorize
 from collections.list import List
 from sys import num_physical_cores, simd_width_of
+from bit import pop_count
+
 
 alias simd_width = simd_width_of[DType.uint8]()
 alias int_type = DType.uint8
@@ -11,12 +13,14 @@ struct PauliString(Copyable, Movable, Stringable):
     var x: UnsafePointer[Scalar[DType.uint8]]
     var z: UnsafePointer[Scalar[DType.uint8]]
     var n_ops: Int
+    var global_phase: Int
 
-    fn __init__(out self, pauli_string: String) raises:
+    fn __init__(out self, pauli_string: String, global_phase: Int = 0) raises:
         self.pauli_string = pauli_string.upper()
         self.n_ops = len(self.pauli_string)
         self.x = UnsafePointer[Scalar[DType.uint8]].alloc(self.n_ops)
         self.z = UnsafePointer[Scalar[DType.uint8]].alloc(self.n_ops)
+        self.global_phase = global_phase
         self.from_string()
 
     fn from_string(mut self) raises:
@@ -103,39 +107,119 @@ struct PauliString(Copyable, Movable, Stringable):
             return self.vec_to_string(self.x, self.z)
         return self.pauli_string
 
+    @staticmethod
+    fn compute_xor_vector[
+        simd_width: Int
+    ](
+        mut c1: SIMD[int_type, simd_width],
+        mut c2: SIMD[int_type, simd_width],
+        x: SIMD[int_type, simd_width],
+        z: SIMD[int_type, simd_width],
+        other_x: SIMD[int_type, simd_width],
+        other_z: SIMD[int_type, simd_width],
+    ) -> Tuple[
+        SIMD[int_type, simd_width],
+        SIMD[int_type, simd_width],
+    ]:
+        var x_result = x ^ other_x
+        var z_result = z ^ other_z
+
+        var anti_commutes = (other_x & z) ^ (x & other_z)
+        c2 ^= (c1 ^ x_result ^ z_result ^ (x & other_z)) & anti_commutes
+        c1 ^= anti_commutes
+
+        return x_result, z_result
+
     fn __mul__(self, other: PauliString) raises -> PauliString:
         var x_prod = UnsafePointer[UInt8].alloc(self.n_ops)
         var z_prod = UnsafePointer[UInt8].alloc(self.n_ops)
+        var c1_accum = UnsafePointer[UInt8].alloc(simd_width)
+        var c2_accum = UnsafePointer[UInt8].alloc(simd_width)
+
+        # Initialize accumulators
+        for i in range(simd_width):
+            c1_accum[i] = 0
+            c2_accum[i] = 0
 
         @parameter
-        fn compute_xor_vector[simd_width: Int](idx: Int):
-            var x_chunk = self.x.load[width=simd_width](idx)
-            var z_chunk = self.z.load[width=simd_width](idx)
-            var other_x_chunk = other.x.load[width=simd_width](idx)
-            var other_z_chunk = other.z.load[width=simd_width](idx)
-            var x_result = x_chunk ^ other_x_chunk
-            var z_result = z_chunk ^ other_z_chunk
+        fn product[simd_width: Int](idx: Int):
+            var c1 = c1_accum.load[width=simd_width](0)
+            var c2 = c2_accum.load[width=simd_width](0)
+
+            var x = self.x.load[width=simd_width](idx)
+            var z = self.z.load[width=simd_width](idx)
+
+            var other_x = other.x.load[width=simd_width](idx)
+            var other_z = other.z.load[width=simd_width](idx)
+
+            x_result, z_result = PauliString.compute_xor_vector(
+                c1, c2, x, z, other_x, other_z
+            )
             x_prod.store[width=simd_width](idx, x_result)
             z_prod.store[width=simd_width](idx, z_result)
+            c1_accum.store[width=simd_width](0, c1)
+            c2_accum.store[width=simd_width](0, c2)
 
-        vectorize[compute_xor_vector, simd_width](self.n_ops)
+        vectorize[product, simd_width](self.n_ops)
+        var c1_final = c1_accum.load[width=simd_width](0)
+        var c2_final = c2_accum.load[width=simd_width](0)
+
+        phase = (pop_count(c1_final) + 2 * pop_count(c2_final)) % 4
+
+        global_phase = Int(phase.reduce_add())
+
         prod_str = self.vec_to_string(x_prod, z_prod)
-        return PauliString(prod_str)
+
+        c1_accum.destroy_pointee()
+        c1_accum.free()
+        c2_accum.destroy_pointee()
+        c2_accum.free()
+
+        return PauliString(prod_str, global_phase=global_phase)
 
     fn prod(mut self, other: PauliString):
+        var c1_accum = UnsafePointer[UInt8].alloc(simd_width)
+        var c2_accum = UnsafePointer[UInt8].alloc(simd_width)
+
+        # Initialize accumulators
+        for i in range(simd_width):
+            c1_accum[i] = 0
+            c2_accum[i] = 0
+
         @parameter
-        fn compute_xor_vector[simd_width: Int](idx: Int):
-            var x_prod_chunk = self.x.load[width=simd_width](idx)
-            var z_prod_chunk = self.z.load[width=simd_width](idx)
-            var other_x_chunk = other.x.load[width=simd_width](idx)
-            var other_z_chunk = other.z.load[width=simd_width](idx)
-            var x_result = x_prod_chunk ^ other_x_chunk
-            var z_result = z_prod_chunk ^ other_z_chunk
+        fn product[simd_width: Int](idx: Int):
+            var c1 = c1_accum.load[width=simd_width](0)
+            var c2 = c2_accum.load[width=simd_width](0)
+
+            var x = self.x.load[width=simd_width](idx)
+            var z = self.z.load[width=simd_width](idx)
+
+            var other_x = other.x.load[width=simd_width](idx)
+            var other_z = other.z.load[width=simd_width](idx)
+
+            x_result, z_result = PauliString.compute_xor_vector(
+                c1, c2, x, z, other_x, other_z
+            )
             self.x.store[width=simd_width](idx, x_result)
             self.z.store[width=simd_width](idx, z_result)
+            c1_accum.store[width=simd_width](0, c1)
+            c2_accum.store[width=simd_width](0, c2)
 
-        vectorize[compute_xor_vector, simd_width](self.n_ops)
+        vectorize[product, simd_width](self.n_ops)
+
+        var c1_final = c1_accum.load[width=simd_width](0)
+        var c2_final = c2_accum.load[width=simd_width](0)
+
+        phase = (pop_count(c1_final) + 2 * pop_count(c2_final)) % 4
+
+        self.global_phase += Int(phase.reduce_add())
+
         self.pauli_string = self.vec_to_string(self.x, self.z)
+
+        c1_accum.destroy_pointee()
+        c1_accum.free()
+        c2_accum.destroy_pointee()
+        c2_accum.free()
 
     fn __del__(deinit self):
         if self.x:
