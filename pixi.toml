@@ -1,5 +1,5 @@
 [workspace]
-channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
+channels = ["https://conda.modular.com/max", "conda-forge"]
 name = "stimojo"
 platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
 version = "0.1.0"
@@ -9,7 +9,9 @@ version = "0.1.0"
 benchmarks = "mojo run -I src benchmarks/run_all_benchmarks.mojo"
 example_pauli_string = "mojo run -I src examples/pauli_string.mojo"
 test_pauli_string = "mojo run -I src test/stimojo/test_pauli_string.mojo"
-tests = { depends-on = ["test_pauli_string"] }
+test_ops = "mojo run -I src test/stimojo/test_ops.mojo"
+test_memory_safety = "mojo run -I src test/stimojo/test_memory_safety.mojo"
+tests = { depends-on = ["test_pauli_string", "test_ops", "test_memory_safety"] }
 format = "mojo format src  test examples benchmarks"
 
 [dependencies]

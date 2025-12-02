@@ -1,13 +1,20 @@
 from stimojo.pauli import PauliString
+from stimojo.ops import phase_from_log_base_i
+from math import log2
+from complex import ComplexScalar
+from python import Python
 
 
 fn main() raises:
-    var p1 = PauliString("XXX")
-    var p2 = PauliString("XXX")
+    var p1 = PauliString("ZYX")
+    var p2 = PauliString("XZY")
 
     print("Product of 2 Pauli strings:{} * {}".format(String(p1), String(p2)))
 
-    var p3 = p1 * p2
+    p3 = p1 * p2
+
+    var exp_phase = phase_from_log_base_i(p3.global_phase)
 
     print("Result: {}".format(String(p3)))
-    print("Global phase: {}".format(p3.global_phase))
+    print("Global phase (log base-i): {}".format(p3.global_phase))
+    print("Global phase: {} + {}j".format(exp_phase.re, exp_phase.im))

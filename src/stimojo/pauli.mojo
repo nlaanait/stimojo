@@ -8,20 +8,60 @@ alias simd_width = simd_width_of[DType.uint8]()
 alias int_type = DType.uint8
 
 
-struct PauliString(Copyable, Movable, Stringable):
+struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
     var pauli_string: String
-    var x: UnsafePointer[Scalar[DType.uint8]]
-    var z: UnsafePointer[Scalar[DType.uint8]]
+    var x: UnsafePointer[UInt8, MutOrigin.external]
+    var z: UnsafePointer[UInt8, MutOrigin.external]
     var n_ops: Int
     var global_phase: Int
 
     fn __init__(out self, pauli_string: String, global_phase: Int = 0) raises:
         self.pauli_string = pauli_string.upper()
         self.n_ops = len(self.pauli_string)
-        self.x = UnsafePointer[Scalar[DType.uint8]].alloc(self.n_ops)
-        self.z = UnsafePointer[Scalar[DType.uint8]].alloc(self.n_ops)
+        self.x = alloc[UInt8](self.n_ops)
+        self.z = alloc[UInt8](self.n_ops)
         self.global_phase = global_phase
         self.from_string()
+
+    # fn __copyinit__(out self, other: Self):
+    #     self.n_ops = other.n_ops
+    #     self.pauli_string = other.pauli_string
+    #     self.global_phase = other.global_phase
+
+    #     # Deep copy x
+    #     self.x = alloc[UInt8](self.n_ops)
+    #     for i in range(self.n_ops):
+    #         self.x[i] = other.x[i]
+
+    #     # Deep copy z
+    #     self.z = alloc[UInt8](self.n_ops)
+    #     for i in range(self.n_ops):
+    #         self.z[i] = other.z[i]
+
+    # fn __moveinit__(out self, deinit existing: Self):
+    #     self.pauli_string = existing.pauli_string
+    #     self.x = existing.x
+    #     self.z = existing.z
+    #     self.n_ops = existing.n_ops
+    #     self.global_phase = existing.global_phase
+
+        # # Nullify other's pointers to prevent double-free
+        # existing.x = alloc[UInt8](0)
+        # existing.z = alloc[UInt8](0)
+
+    fn __eq__(self, other: PauliString) -> Bool:
+        if self.n_ops != other.n_ops:
+            return False
+        if self.global_phase != other.global_phase:
+            return False
+
+        for i in range(self.n_ops):
+            if self.x[i] != other.x[i] or self.z[i] != other.z[i]:
+                return False
+        return True
+
+    fn __ne__(self, other: PauliString) -> Bool:
+        return not (self == other)
 
     fn from_string(mut self) raises:
         s_up = self.pauli_string.as_bytes()
@@ -45,7 +85,7 @@ struct PauliString(Copyable, Movable, Stringable):
     fn vec_to_string(
         self, x: UnsafePointer[UInt8], z: UnsafePointer[UInt8]
     ) -> String:
-        var result = UnsafePointer[UInt8].alloc(self.n_ops)
+        var result = alloc[UInt8](self.n_ops)
 
         @always_inline
         @parameter
@@ -131,10 +171,10 @@ struct PauliString(Copyable, Movable, Stringable):
         return x_result, z_result
 
     fn __mul__(self, other: PauliString) raises -> PauliString:
-        var x_prod = UnsafePointer[UInt8].alloc(self.n_ops)
-        var z_prod = UnsafePointer[UInt8].alloc(self.n_ops)
-        var c1_accum = UnsafePointer[UInt8].alloc(simd_width)
-        var c2_accum = UnsafePointer[UInt8].alloc(simd_width)
+        var x_prod = alloc[UInt8](self.n_ops)
+        var z_prod = alloc[UInt8](self.n_ops)
+        var c1_accum = alloc[UInt8](simd_width)
+        var c2_accum = alloc[UInt8](simd_width)
 
         # Initialize accumulators
         for i in range(simd_width):
@@ -178,8 +218,8 @@ struct PauliString(Copyable, Movable, Stringable):
         return PauliString(prod_str, global_phase=global_phase)
 
     fn prod(mut self, other: PauliString):
-        var c1_accum = UnsafePointer[UInt8].alloc(simd_width)
-        var c2_accum = UnsafePointer[UInt8].alloc(simd_width)
+        var c1_accum = alloc[UInt8](simd_width)
+        var c2_accum = alloc[UInt8](simd_width)
 
         # Initialize accumulators
         for i in range(simd_width):

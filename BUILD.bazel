@@ -9,8 +9,8 @@ mojo_library(
 )
 
 mojo_binary(
-    name = "pauli_benchmark",
-    srcs = ["src/.mojo"],
+    name = "run_all_benchmarks",
+    srcs = ["benchmarks/run_all_benchmarks.mojo"],
     deps = [
         ":stimojo",
         "@mojo//:stdlib",
@@ -18,9 +18,31 @@ mojo_binary(
 )
 
 mojo_test(
-    name = "test_xzencoding",
+    name = "test_pauli_string",
     srcs = [
-        "test/stimojo/test_xzencoding.mojo",
+        "test/stimojo/test_pauli_string.mojo",
+    ],
+    deps = [
+        ":stimojo",
+        "@mojo//:stdlib",
+    ],
+)
+
+mojo_test(
+    name = "test_ops",
+    srcs = [
+        "test/stimojo/test_ops.mojo",
+    ],
+    deps = [
+        ":stimojo",
+        "@mojo//:stdlib",
+    ],
+)
+
+mojo_test(
+    name = "test_memory_safety",
+    srcs = [
+        "test/stimojo/test_memory_safety.mojo",
     ],
     deps = [
         ":stimojo",

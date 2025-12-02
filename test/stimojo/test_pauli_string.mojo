@@ -4,6 +4,9 @@
 
 from stimojo.pauli import PauliString
 from testing import assert_equal, TestSuite
+from sys.info import simd_width_of
+
+alias simd_width = simd_width_of[DType.uint8]()
 
 
 def test_from_string_roundtrip():
@@ -110,7 +113,12 @@ def test_product_vs_mul():
 def test_product_simd_alignment():
     print("== test_product_simd_alignment")
     # Test product() with different SIMD alignments
-    var lengths = [1, 15, 33]  # single char, sub-SIMD, over-SIMD
+    var lengths = [
+        1,
+        simd_width // 2,
+        simd_width,
+        simd_width * 2,
+    ]  # single char, sub-SIMD, SIMD, over-SIMD
 
     for length in lengths:
         # Create strings of the specified length
@@ -221,6 +229,21 @@ def test_global_phase_rules_pair_paulis():
     var result2 = p_multi1 * p_multi2
     assert_equal(String(result2), "YIYY")
     assert_equal(result2.global_phase, 1)
+
+
+def test_equality():
+    print("== test_equality")
+    var p1 = PauliString("IXYZ")
+    var p2 = PauliString("IXYZ")
+    var p3 = PauliString("YZIX")
+    
+    assert_equal(p1, p2)
+    assert_equal(p1 == p3, False)
+    assert_equal(p1 != p3, True)
+    
+    # Test equality with phase difference
+    var p1_phase = PauliString("IXYZ", global_phase=1)
+    assert_equal(p1 == p1_phase, False)
 
 
 fn main() raises:
