@@ -23,32 +23,6 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
         self.global_phase = global_phase
         self.from_string()
 
-    # fn __copyinit__(out self, other: Self):
-    #     self.n_ops = other.n_ops
-    #     self.pauli_string = other.pauli_string
-    #     self.global_phase = other.global_phase
-
-    #     # Deep copy x
-    #     self.x = alloc[UInt8](self.n_ops)
-    #     for i in range(self.n_ops):
-    #         self.x[i] = other.x[i]
-
-    #     # Deep copy z
-    #     self.z = alloc[UInt8](self.n_ops)
-    #     for i in range(self.n_ops):
-    #         self.z[i] = other.z[i]
-
-    # fn __moveinit__(out self, deinit existing: Self):
-    #     self.pauli_string = existing.pauli_string
-    #     self.x = existing.x
-    #     self.z = existing.z
-    #     self.n_ops = existing.n_ops
-    #     self.global_phase = existing.global_phase
-
-        # # Nullify other's pointers to prevent double-free
-        # existing.x = alloc[UInt8](0)
-        # existing.z = alloc[UInt8](0)
-
     fn __eq__(self, other: PauliString) -> Bool:
         if self.n_ops != other.n_ops:
             return False

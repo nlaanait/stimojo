@@ -8,6 +8,7 @@ version = "0.1.0"
 [tasks]
 benchmarks = "mojo run -I src benchmarks/run_all_benchmarks.mojo"
 example_pauli_string = "mojo run -I src examples/pauli_string.mojo"
+example_tableau = "mojo run -I src examples/tableau.mojo"
 test_pauli_string = "mojo run -I src test/stimojo/test_pauli_string.mojo"
 test_ops = "mojo run -I src test/stimojo/test_ops.mojo"
 test_memory_safety = "mojo run -I src test/stimojo/test_memory_safety.mojo"
