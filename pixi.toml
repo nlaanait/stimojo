@@ -12,7 +12,9 @@ example_tableau = "mojo run -I src examples/tableau.mojo"
 test_pauli_string = "mojo run -I src test/stimojo/test_pauli_string.mojo"
 test_ops = "mojo run -I src test/stimojo/test_ops.mojo"
 test_memory_safety = "mojo run -I src test/stimojo/test_memory_safety.mojo"
-tests = { depends-on = ["test_pauli_string", "test_ops", "test_memory_safety"] }
+test_tableau = "mojo run -I src test/stimojo/test_tableau.mojo"
+test_tableau_ops = "mojo run -I src test/stimojo/test_tableau_ops.mojo"
+tests = { depends-on = ["test_pauli_string", "test_ops", "test_memory_safety", "test_tableau"] }
 format = "mojo format src  test examples benchmarks"
 
 [dependencies]
