@@ -56,10 +56,24 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
             else:
                 raise Error("Encountered Invalid Pauli String")
 
+    @staticmethod
+    fn from_xz_vectors(
+        x: UnsafePointer[UInt8, MutOrigin.external],
+        z: UnsafePointer[UInt8, MutOrigin.external],
+        n_ops: Int,
+    ) raises -> PauliString:
+        p_str = PauliString.vec_to_string(x, z, n_ops)
+        return PauliString(
+            p_str,
+        )
+
+    @staticmethod
     fn vec_to_string(
-        self, x: UnsafePointer[UInt8], z: UnsafePointer[UInt8]
+        x: UnsafePointer[UInt8],
+        z: UnsafePointer[UInt8],
+        n_ops: Int,
     ) -> String:
-        var result = alloc[UInt8](self.n_ops)
+        var result = alloc[UInt8](n_ops)
 
         @always_inline
         @parameter
@@ -94,14 +108,14 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
 
         var str = String()
 
-        if self.n_ops >= simd_width:
+        if n_ops >= simd_width:
             # use vectorized vec to pauli string conversion
-            vectorize[compare, simd_width](self.n_ops)
-            for idx in range(self.n_ops):
+            vectorize[compare, simd_width](n_ops)
+            for idx in range(n_ops):
                 str += chr(Int(result[idx]))
         else:
             # fall back on conditional
-            for idx in range(self.n_ops):
+            for idx in range(n_ops):
                 if x[idx] == 0 and z[idx] == 0:
                     str += "I"
                 elif x[idx] == 0 and z[idx] == 1:
@@ -118,7 +132,7 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
 
     fn __str__(self) -> String:
         if self.pauli_string == String():
-            return self.vec_to_string(self.x, self.z)
+            return PauliString.vec_to_string(self.x, self.z, self.n_ops)
         return self.pauli_string
 
     @staticmethod
@@ -180,9 +194,11 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
 
         phase = (pop_count(c1_final) + 2 * pop_count(c2_final)) % 4
 
-        global_phase = Int(phase.reduce_add())
+        global_phase = (
+            self.global_phase + other.global_phase + Int(phase.reduce_add())
+        )
 
-        prod_str = self.vec_to_string(x_prod, z_prod)
+        prod_str = PauliString.vec_to_string(x_prod, z_prod, self.n_ops)
 
         c1_accum.destroy_pointee()
         c1_accum.free()
@@ -226,9 +242,11 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
 
         phase = (pop_count(c1_final) + 2 * pop_count(c2_final)) % 4
 
-        self.global_phase += Int(phase.reduce_add())
+        self.global_phase += other.global_phase + Int(phase.reduce_add())
 
-        self.pauli_string = self.vec_to_string(self.x, self.z)
+        self.pauli_string = PauliString.vec_to_string(
+            self.x, self.z, self.n_ops
+        )
 
         c1_accum.destroy_pointee()
         c1_accum.free()
