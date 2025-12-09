@@ -1,5 +1,6 @@
 from memory import memset, memcpy, UnsafePointer
 from stimojo.pauli import PauliString
+from collections.list import List
 
 alias int_type = DType.uint8
 
@@ -51,7 +52,7 @@ struct Tableau(Copyable, Movable):
 
     fn __init__(out self, n_qubits: Int):
         self.n_qubits = n_qubits
-        var size = n_qubits * n_qubits
+        var size = n_qubits**2
 
         self._xs_xt = alloc[UInt8](size)
         self._xs_zt = alloc[UInt8](size)
@@ -435,8 +436,30 @@ struct Tableau(Copyable, Movable):
         self._pauli_to_row(p1, target_half, target_row)
 
     fn prepend_H_XY(mut self, q: Int) raises:
-        self._mul_rows(0, q, 1, q)
-        self.prepend_Y(q)
+        var n = self.n_qubits
+        for k in range(n):  # Iterate through each generator row
+            var xs_idx = q + k * n
+            var zs_idx = q + k * n
+
+            # Transform for X-type stabilizers (t.xs[k])
+            var x_val_xs = self._xs_xt[xs_idx]
+            var z_val_xs = self._xs_zt[xs_idx]
+            if x_val_xs == 1 and z_val_xs == 0:  # X -> Y
+                self._xs_zt[xs_idx] = 1  # Change X to Y
+            elif x_val_xs == 0 and z_val_xs == 1:  # Z -> -Z
+                self._xs_signs[k] ^= 1  # Flip sign
+            elif x_val_xs == 1 and z_val_xs == 1:  # Y -> X
+                self._xs_zt[xs_idx] = 0  # Change Y to X
+
+            # Transform for Z-type stabilizers (t.zs[k])
+            var x_val_zs = self._zs_xt[zs_idx]
+            var z_val_zs = self._zs_zt[zs_idx]
+            if x_val_zs == 1 and z_val_zs == 0:  # X -> Y
+                self._zs_zt[zs_idx] = 1  # Change X to Y
+            elif x_val_zs == 0 and z_val_zs == 1:  # Z -> -Z
+                self._zs_signs[k] ^= 1  # Flip sign
+            elif x_val_zs == 1 and z_val_zs == 1:  # Y -> X
+                self._zs_zt[zs_idx] = 0  # Change Y to X
 
     fn prepend_C_XYZ(mut self, q: Int) raises:
         self._mul_rows(1, q, 0, q)
@@ -557,6 +580,46 @@ struct Tableau(Copyable, Movable):
                 res.global_phase = (res.global_phase + 1) % 4
 
         return res^
+
+    fn __call__(self, p: PauliString) raises -> PauliString:
+        return self.eval(p)
+
+    fn apply_within(
+        self, mut target: PauliString, target_qubits: List[Int]
+    ) raises:
+        if len(target_qubits) != self.n_qubits:
+            raise Error("Tableau size must match number of target qubits")
+
+        # Construct temporary PauliString initialized to Identity
+        var s = String("")
+        for _ in range(self.n_qubits):
+            s += "I"
+        var inp = PauliString(s)
+
+        # Gather
+        for i in range(self.n_qubits):
+            var q = target_qubits[i]
+            if q >= target.n_ops:
+                raise Error("Target qubit index out of bounds")
+            inp.x[i] = target.x[q]
+            inp.z[i] = target.z[q]
+
+        # Eval
+        var out = self.eval(inp)
+
+        # Scatter
+        for i in range(self.n_qubits):
+            var q = target_qubits[i]
+            if q >= target.n_ops:
+                raise Error("Target qubit index out of bounds")
+            target.x[q] = out.x[i]
+            target.z[q] = out.z[i]
+
+        # Update Phase
+        target.global_phase += out.global_phase
+        target.pauli_string = PauliString.vec_to_string(
+            target.x, target.z, target.n_ops
+        )
 
     # === Lifecycle ===
 
