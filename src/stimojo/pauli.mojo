@@ -104,9 +104,10 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
                 self.z[idx] = 1
             else:
                 raise Error(
-                    "Encountered Invalid Pauli String!\nValid characters:\n'I':"
+                    "Encountered Invalid Pauli String!\nValid characters:\n'I(i)':"
                     " Identity.\n'X(x)': Pauli X.\n'Y(y)': Pauli Y.\n'Z(z)':"
-                    " Pauli Z.\n Global Phase should be initialized via global_phase arg in base-i log."
+                    " Pauli Z.\n Global Phase should be initialized via"
+                    " global_phase arg in base-i log."
                 )
 
     @staticmethod

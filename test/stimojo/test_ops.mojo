@@ -2,6 +2,7 @@ from stimojo.ops import phase_from_log_base_i, commutes
 from stimojo.pauli import PauliString
 from testing import assert_equal, assert_true, assert_false, TestSuite
 
+
 fn test_phase_from_log_base_i() raises:
     print("== test_phase_from_log_base_i")
     # 0 -> 1
@@ -29,6 +30,7 @@ fn test_phase_from_log_base_i() raises:
     assert_equal(p4.re, 1)
     assert_equal(p4.im, 0)
 
+
 fn test_commutes_sanity() raises:
     print("== test_commutes_sanity")
     # Test basic commutativity
@@ -36,6 +38,7 @@ fn test_commutes_sanity() raises:
     assert_true(commutes(PauliString("X"), PauliString("X")))
     assert_true(commutes(PauliString("Z"), PauliString("Z")))
     assert_true(commutes(PauliString("I"), PauliString("X")))
+
 
 fn main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

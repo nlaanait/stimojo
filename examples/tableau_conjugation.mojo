@@ -12,7 +12,7 @@ fn main() raises:
     # 1. Setup: Create a Tableau representing a CNOT gate (CX 0->1)
     # --------------------------------------------------------------------------
     var t = Tableau(2)
-    t.apply_CX(0, 1) # Applies CNOT(0, 1)
+    t.apply_CX(0, 1)  # Applies CNOT(0, 1)
 
     # --------------------------------------------------------------------------
     # 2. In-Place Conjugation using `apply_within`
@@ -20,13 +20,15 @@ fn main() raises:
     # We create a PauliString "XZI". We want to apply the 2-qubit CNOT (qubits 0,1)
     # to the first two qubits of this 3-qubit string.
     var p = PauliString("XZI")
-    
+
     # Define target qubits [0, 1]
     var target_qubits = List[Int]()
     target_qubits.append(0)
     target_qubits.append(1)
 
-    print("\n[In-Place] Applying CNOT(0,1) to PauliString 'XZI' on qubits {0, 1}")
+    print(
+        "\n[In-Place] Applying CNOT(0,1) to PauliString 'XZI' on qubits {0, 1}"
+    )
     print("  Input:  " + String(p) + " (Phase: " + String(p.global_phase) + ")")
 
     # Conjugate: P' = T * P * T^-1
@@ -41,14 +43,20 @@ fn main() raises:
     # --------------------------------------------------------------------------
     # Create a new PauliString "XZ" matching the tableau size exactly.
     var p_small = PauliString("XZ")
-    
+
     print("\n[Out-of-Place] t(p) where t=CNOT(0,1) and p='XZ'")
     print("  Input:  " + String(p_small))
-    
+
     # Syntax t(p) creates a new PauliString
     var p_out = t(p_small)
-    
-    print("  Output: " + String(p_out) + " (Phase: " + String(p_out.global_phase) + ")")
+
+    print(
+        "  Output: "
+        + String(p_out)
+        + " (Phase: "
+        + String(p_out.global_phase)
+        + ")"
+    )
     print("  (Expected: YY, Phase 2)")
 
     print("---------------------------------------------------")

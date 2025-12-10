@@ -78,7 +78,7 @@ struct Tableau(Copyable, Movable):
 
     fn is_pauli_product(self) -> Bool:
         var size = self.n_qubits * self.n_qubits
-        
+
         # Check if X part of X output is identity
         # We need to check if _xs_xt is Identity matrix
         for k in range(self.n_qubits):
@@ -86,7 +86,7 @@ struct Tableau(Copyable, Movable):
                 var expected = 1 if k == q else 0
                 if self._xs_xt[q + k * self.n_qubits] != expected:
                     return False
-        
+
         # Check if Z part of Z output is identity
         # We need to check if _zs_zt is Identity matrix
         for k in range(self.n_qubits):
@@ -94,23 +94,23 @@ struct Tableau(Copyable, Movable):
                 var expected = 1 if k == q else 0
                 if self._zs_zt[q + k * self.n_qubits] != expected:
                     return False
-                    
+
         # Check if Z part of X output is zero
         for i in range(size):
             if self._xs_zt[i] != 0:
                 return False
-                
+
         # Check if X part of Z output is zero
         for i in range(size):
             if self._zs_xt[i] != 0:
                 return False
-                
+
         return True
 
     fn to_pauli_string(self) raises -> PauliString:
         if not self.is_pauli_product():
             raise Error("The Tableau isn't equivalent to a Pauli product.")
-            
+
         p = PauliString.from_xz_vectors(
             self.xs().signs, self.zs().signs, self.n_qubits
         )

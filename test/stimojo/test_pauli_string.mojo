@@ -30,7 +30,9 @@ def test_mul_produces_expected():
     # for these inputs each position should XOR to 'Y' with '+' phase
     var expected_str = "Y" * (4 * repeats)
     assert_equal(String(prod), "+" + expected_str)
-    assert_equal(prod.global_phase.log_value, 0) # X*Y=iZ, Y*Z=iX, Z*X=iY. Sum of phases for IXYZ * YZIX should be 0.
+    assert_equal(
+        prod.global_phase.log_value, 0
+    )  # X*Y=iZ, Y*Z=iX, Z*X=iY. Sum of phases for IXYZ * YZIX should be 0.
 
 
 def test_simd_boundary():
@@ -112,7 +114,10 @@ def test_product_vs_mul():
             )  # fresh copy since product modifies in-place
             p1_copy.prod(p2)
             assert_equal(String(p1_copy), String(mul_result))
-            assert_equal(p1_copy.global_phase.log_value, mul_result.global_phase.log_value)
+            assert_equal(
+                p1_copy.global_phase.log_value,
+                mul_result.global_phase.log_value,
+            )
 
 
 def test_product_simd_alignment():
@@ -141,11 +146,15 @@ def test_product_simd_alignment():
         # X*Z=-iY, so total phase for n 'X' * 'Z' = (-i)^n
         # This is (length * 3) % 4.
         var expected_phase = (length * 3) % 4
-        
-        assert_equal(String(mul_result), String(Phase(expected_phase)) + expected_str)
+
+        assert_equal(
+            String(mul_result), String(Phase(expected_phase)) + expected_str
+        )
         assert_equal(mul_result.global_phase.log_value, expected_phase)
-        
-        assert_equal(String(p1_copy), String(Phase(expected_phase)) + expected_str)
+
+        assert_equal(
+            String(p1_copy), String(Phase(expected_phase)) + expected_str
+        )
         assert_equal(p1_copy.global_phase.log_value, expected_phase)
 
 
@@ -164,7 +173,9 @@ def test_product_chain():
     chain.prod(p3)  # modify in place again
 
     assert_equal(String(chain), String(mul_result))
-    assert_equal(chain.global_phase.log_value, mul_result.global_phase.log_value)
+    assert_equal(
+        chain.global_phase.log_value, mul_result.global_phase.log_value
+    )
 
 
 def test_global_phase_rules_single_paulis():
@@ -224,8 +235,8 @@ def test_global_phase_rules_single_paulis():
 def test_global_phase_rules_pair_paulis():
     print("== test_global_phase_rules_pair_paulis")
 
-    var p1 = PauliString("ZZ") # Z_0 Z_1
-    var p2 = PauliString("XX") # X_0 X_1
+    var p1 = PauliString("ZZ")  # Z_0 Z_1
+    var p2 = PauliString("XX")  # X_0 X_1
     var result = p1 * p2
     # Z_0 X_0 = -i Y_0
     # Z_1 X_1 = -i Y_1
@@ -259,14 +270,16 @@ def test_equality():
     var p1 = PauliString("IXYZ")
     var p2 = PauliString("IXYZ")
     var p3 = PauliString("YZIX")
-    
+
     assert_equal(p1, p2)
     assert_equal(p1 == p3, False)
     assert_equal(p1 != p3, True)
-    
+
     # Test equality with phase difference
-    var p1_phase = PauliString("IXYZ", global_phase=1) # +iIXYZ
-    assert_equal(p1.global_phase != p1_phase.global_phase, True) # Phase(0) should not equal Phase(1)
+    var p1_phase = PauliString("IXYZ", global_phase=1)  # +iIXYZ
+    assert_equal(
+        p1.global_phase != p1_phase.global_phase, True
+    )  # Phase(0) should not equal Phase(1)
     assert_equal(p1 == p1_phase, False)
 
 

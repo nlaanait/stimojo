@@ -11,7 +11,7 @@ fn main() raises:
 
     print("\nApplying Hadamard on qubit 1:")
     t.apply_hadamard(1)
-    
+
     try:
         print(String(t.to_pauli_string()))
     except e:
