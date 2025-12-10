@@ -48,22 +48,35 @@ If not using Pixi, ensure you have the Mojo SDK installed and accessible in your
 Execute all tests to verify the installation:
 
 ```bash
-mojo test/stimojo/test_pauli_string.mojo
+pixi run tests
 ```
 
-### Example: Pauli String Operations
+### Examples
 
-Run the included example to see stimojo in action:
+Run the included examples to see stimojo in action:
+
+#### Pauli String Operations
+Demonstrates creation and multiplication of Pauli strings with automatic phase tracking.
 
 ```bash
-mojo examples/pauli_string.mojo
+pixi run example_pauli_string
 ```
 
-This demonstrates:
+#### Tableau Operations
+Shows the application of Clifford gates (Hadamard, CNOT, S, etc.) on a stabilizer tableau.
 
-- Creating Pauli strings
-- Multiplying Pauli operators with automatic phase tracking
-- SIMD-accelerated operations
+```bash
+pixi run example_tableau
+```
+
+#### Tableau Conjugation
+Demonstrates conjugating Pauli strings by Clifford tableaus, a core operation in stabilizer simulation.
+
+```bash
+pixi run example_tableau_conjugation
+```
+
+This example shows both in-place (`apply_within`) and out-of-place (`t(p)`) conjugation.
 
 ## Benchmarking
 
@@ -72,13 +85,13 @@ stimojo includes comprehensive benchmarks to evaluate performance:
 ### Run All Benchmarks
 
 ```bash
-mojo benchmarks/run_all_benchmarks.mojo
+pixi run benchmarks
 ```
 
 ### Individual Benchmarks
 
 ```bash
-mojo benchmarks/pauli_product_benchmark.mojo
+mojo -I src benchmarks/pauli_product_benchmark.mojo
 ```
 
 This benchmark measures:
@@ -99,9 +112,10 @@ The benchmarks provide timing results in seconds and can help you:
 
 ### Core Components
 
-- **`src/stimojo/pauli.mojo`**: Main Pauli string implementation with SIMD-accelerated operations
-- **`src/stimojo/ops.mojo`**: Circuit operations and stabilizer frame operations
-- **`test/stimojo/test_pauli_string.mojo`**: Comprehensive test suite
+- **`src/stimojo/pauli.mojo`**: Main Pauli string implementation with SIMD-accelerated operations. Includes the `PauliString` and `Phase` structs.
+- **`src/stimojo/tableau.mojo`**: Implementation of Clifford tableaus (`Tableau`) for efficient stabilizer state tracking and evolution. Supports Clifford gate application and Pauli conjugation.
+- **`src/stimojo/ops.mojo`**: Circuit operations and stabilizer frame operations.
+- **`test/stimojo/`**: Comprehensive test suite covering Pauli strings, tableaus, and memory safety.
 
 ### SIMD Strategy
 
@@ -131,17 +145,38 @@ Global phases are tracked in log base _i_ (0=1, 1=_i_, 2=-1, 3=-_i_):
 ```mojo
 # XY = iZ (phase = 1)
 var result = PauliString("X") * PauliString("Y")
-assert_equal(result.global_phase, 1)
+assert_equal(result.global_phase.log_value, 1)
+```
+
+### Tableau Operations
+
+Manipulate stabilizer states efficiently using Clifford tableaus:
+
+```mojo
+var t = Tableau(2)
+t.prepend_H_XZ(0) # Apply Hadamard to qubit 0
+t.prepend_ZCX(0, 1) # Apply CNOT (control 0, target 1)
+
+var p = PauliString("XI")
+var conjugated = t(p) # Conjugate Pauli string by the tableau
 ```
 
 ### In-Place Operations
 
-For efficiency, use in-place multiplication:
+For efficiency, use in-place multiplication and conjugation:
 
 ```mojo
+# In-place Pauli multiplication
 var p1 = PauliString("XYZZYX")
 var p2 = PauliString("ZYXXYZ")
-p1.prod(p2)  # Modifies p1 in-place, more efficient than p1 * p2
+p1.prod(p2) 
+
+# In-place Tableau conjugation
+var t = Tableau(2)
+# ... configure tableau ...
+var p = PauliString("XZ")
+var target_qubits = List[Int](0, 1)
+t.apply_within(p, target_qubits) # Modifies p in-place
 ```
 
 ## Testing
@@ -149,7 +184,8 @@ p1.prod(p2)  # Modifies p1 in-place, more efficient than p1 * p2
 Run tests with detailed output:
 
 ```bash
-mojo -debug test/stimojo/test_pauli_string.mojo
+mojo -I src test/stimojo/test_pauli_string.mojo
+mojo -I src test/stimojo/test_tableau_ops.mojo
 ```
 
 
