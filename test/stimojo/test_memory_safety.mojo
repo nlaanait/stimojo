@@ -12,7 +12,7 @@ fn test_copy_semantics() raises:
 fn test_move_semantics() raises:
     var p_orig = PauliString("YZ")
     var p_moved = p_orig^
-    assert_equal(String(p_moved), "YZ")
+    assert_equal(String(p_moved), "+YZ")
 
 
 fn main() raises:

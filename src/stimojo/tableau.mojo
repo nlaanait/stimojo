@@ -1,5 +1,5 @@
 from memory import memset, memcpy, UnsafePointer
-from stimojo.pauli import PauliString
+from stimojo.pauli import PauliString, Phase
 from collections.list import List
 
 alias int_type = DType.uint8
@@ -76,7 +76,41 @@ struct Tableau(Copyable, Movable):
             self._xs_xt[diag_idx] = 1
             self._zs_zt[diag_idx] = 1
 
+    fn is_pauli_product(self) -> Bool:
+        var size = self.n_qubits * self.n_qubits
+        
+        # Check if X part of X output is identity
+        # We need to check if _xs_xt is Identity matrix
+        for k in range(self.n_qubits):
+            for q in range(self.n_qubits):
+                var expected = 1 if k == q else 0
+                if self._xs_xt[q + k * self.n_qubits] != expected:
+                    return False
+        
+        # Check if Z part of Z output is identity
+        # We need to check if _zs_zt is Identity matrix
+        for k in range(self.n_qubits):
+            for q in range(self.n_qubits):
+                var expected = 1 if k == q else 0
+                if self._zs_zt[q + k * self.n_qubits] != expected:
+                    return False
+                    
+        # Check if Z part of X output is zero
+        for i in range(size):
+            if self._xs_zt[i] != 0:
+                return False
+                
+        # Check if X part of Z output is zero
+        for i in range(size):
+            if self._zs_xt[i] != 0:
+                return False
+                
+        return True
+
     fn to_pauli_string(self) raises -> PauliString:
+        if not self.is_pauli_product():
+            raise Error("The Tableau isn't equivalent to a Pauli product.")
+            
         p = PauliString.from_xz_vectors(
             self.xs().signs, self.zs().signs, self.n_qubits
         )
@@ -399,13 +433,13 @@ struct Tableau(Copyable, Movable):
             p.z[c] = zt_ptr[idx]
 
         if signs_ptr[row] == 1:
-            p.global_phase = 2  # -1 phase
+            p.global_phase = Phase(2)  # -1 phase
         else:
-            p.global_phase = 0
+            p.global_phase = Phase(0)
 
         return p^
 
-    fn _pauli_to_row(mut self, p: PauliString, half: Int, row: Int):
+    fn _pauli_to_row(mut self, p: PauliString, half: Int, row: Int) raises:
         var n = self.n_qubits
         var xt_ptr = self._xs_xt if half == 0 else self._zs_xt
         var zt_ptr = self._xs_zt if half == 0 else self._zs_zt
@@ -416,7 +450,7 @@ struct Tableau(Copyable, Movable):
             xt_ptr[idx] = p.x[c]
             zt_ptr[idx] = p.z[c]
 
-        if p.global_phase == 2:
+        if p.global_phase == Phase(2):
             signs_ptr[row] = 1
         else:
             signs_ptr[row] = 0
@@ -432,7 +466,7 @@ struct Tableau(Copyable, Movable):
         var p2 = self._row_to_pauli(source_half, source_row)
         p1.prod(p2)
         # Simulate IgnoreAntiCommute: drop imaginary component of phase
-        p1.global_phase &= 2
+        p1.global_phase = Phase(p1.global_phase.log_value & 2)
         self._pauli_to_row(p1, target_half, target_row)
 
     fn prepend_H_XY(mut self, q: Int) raises:
@@ -555,12 +589,12 @@ struct Tableau(Copyable, Movable):
         # We want T(Y) = T(i X Z) = i T(X) T(Z).
         # py = T(X) * T(Z).
         # result = i * py.
-        py.global_phase = (py.global_phase + 1) % 4
+        py.global_phase += 1
         return py^
 
     fn eval(self, p: PauliString) raises -> PauliString:
         var res = PauliString("I" * self.n_qubits)
-        res.global_phase = p.global_phase
+        res.global_phase = p.global_phase.copy()
 
         for k in range(self.n_qubits):
             var x = p.x[k]
@@ -577,7 +611,7 @@ struct Tableau(Copyable, Movable):
                 var row_z = self._row_to_pauli(1, k)
                 res.prod(row_x)
                 res.prod(row_z)
-                res.global_phase = (res.global_phase + 1) % 4
+                res.global_phase += 1
 
         return res^
 

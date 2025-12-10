@@ -8,19 +8,68 @@ alias simd_width = simd_width_of[DType.uint8]()
 alias int_type = DType.uint8
 
 
+struct Phase(
+    Copyable, EqualityComparable, ImplicitlyCopyable, Movable, Stringable
+):
+    var log_value: Int
+
+    fn __init__(out self, value: Int) raises:
+        self.log_value = value % 4
+        self._validate()
+
+    fn __str__(self) -> String:
+        var str_phase = String()
+        if self.log_value % 4 == 0:
+            str_phase = "+"
+        elif self.log_value % 4 == 1:
+            str_phase = "i"
+        elif self.log_value % 4 == 2:
+            str_phase = "-"
+        elif self.log_value % 4 == 3:
+            str_phase = "-i"
+        return str_phase
+
+    fn __add__(self, other: Phase) raises -> Phase:
+        return Phase(self.log_value + other.log_value)
+
+    fn __add__(self, other: Int) raises -> Phase:
+        return self + Phase(other)
+
+    fn __iadd__(mut self, other: Phase):
+        self.log_value = (self.log_value + other.log_value) % 4
+
+    fn __iadd__(mut self, other: Int):
+        self.log_value = (self.log_value + other) % 4
+
+    fn __eq__(self, other: Phase) -> Bool:
+        if self.log_value != other.log_value:
+            return False
+        return True
+
+    fn __ne__(self, other: Phase) -> Bool:
+        return not (self == other)
+
+    fn _validate(self) raises:
+        if not (self.log_value in [0, 1, 2, 3]):
+            raise Error(
+                "Phase should be given in log-i base (mod 4):\n0 -->1, 1-->i, 2"
+                " -->-1, 3 -->-i, ..."
+            )
+
+
 struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
     var pauli_string: String
     var x: UnsafePointer[UInt8, MutOrigin.external]
     var z: UnsafePointer[UInt8, MutOrigin.external]
     var n_ops: Int
-    var global_phase: Int
+    var global_phase: Phase
 
     fn __init__(out self, pauli_string: String, global_phase: Int = 0) raises:
         self.pauli_string = pauli_string.upper()
         self.n_ops = len(self.pauli_string)
         self.x = alloc[UInt8](self.n_ops)
         self.z = alloc[UInt8](self.n_ops)
-        self.global_phase = global_phase
+        self.global_phase = Phase(global_phase)
         self.from_string()
 
     fn __eq__(self, other: PauliString) -> Bool:
@@ -54,7 +103,11 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
                 self.x[idx] = 1
                 self.z[idx] = 1
             else:
-                raise Error("Encountered Invalid Pauli String")
+                raise Error(
+                    "Encountered Invalid Pauli String!\nValid characters:\n'I':"
+                    " Identity.\n'X(x)': Pauli X.\n'Y(y)': Pauli Y.\n'Z(z)':"
+                    " Pauli Z.\n Global Phase should be initialized via global_phase arg in base-i log."
+                )
 
     @staticmethod
     fn from_xz_vectors(
@@ -133,7 +186,7 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
     fn __str__(self) -> String:
         if self.pauli_string == String():
             return PauliString.vec_to_string(self.x, self.z, self.n_ops)
-        return self.pauli_string
+        return String(self.global_phase) + self.pauli_string
 
     @staticmethod
     fn compute_xor_vector[
@@ -205,9 +258,9 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
         c2_accum.destroy_pointee()
         c2_accum.free()
 
-        return PauliString(prod_str, global_phase=global_phase)
+        return PauliString(prod_str, global_phase=global_phase.log_value)
 
-    fn prod(mut self, other: PauliString):
+    fn prod(mut self, other: PauliString) raises:
         var c1_accum = alloc[UInt8](simd_width)
         var c2_accum = alloc[UInt8](simd_width)
 
