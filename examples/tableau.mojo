@@ -1,5 +1,6 @@
 from stimojo.tableau import Tableau
 
+
 fn main() raises:
     var n_qubits = 2
     var t = Tableau(n_qubits)
@@ -10,16 +11,21 @@ fn main() raises:
 
     print("\nApplying Hadamard on qubit 1:")
     t.apply_hadamard(1)
-    print(String(t.to_pauli_string()))
+    
+    try:
+        print(String(t.to_pauli_string()))
+    except e:
+        print("Error converting to PauliString: " + String(e))
 
     print("\nTableau after H on qubit 1:")
     print_tableau(t)
+
 
 # Helper function to print a Tableau
 fn print_tableau(t: Tableau):
     var n_qubits = t.n_qubits
     print("Tableau (", 2 * n_qubits, "x", 2 * n_qubits + 1, "): ")
-    
+
     # Print X outputs
     for k in range(n_qubits):
         var sign = t.x_sign(k)
@@ -27,7 +33,7 @@ fn print_tableau(t: Tableau):
             print("-", end="")
         else:
             print("+", end="")
-            
+
         for q in range(n_qubits):
             var x = t.x_out_x(k, q)
             var z = t.x_out_z(k, q)
@@ -48,7 +54,7 @@ fn print_tableau(t: Tableau):
             print("-", end="")
         else:
             print("+", end="")
-            
+
         for q in range(n_qubits):
             var x = t.z_out_x(k, q)
             var z = t.z_out_z(k, q)
