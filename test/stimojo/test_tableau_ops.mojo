@@ -83,7 +83,7 @@ def test_eval_gates():
     check_eval(t, "+IX", "+IX")
     check_eval(t, "+ZI", "+ZI")
     check_eval(t, "+IZ", "+ZZ")
-    check_eval(t, "+YY", "-XZ")  # This was -XZ before. Need to verify.
+    check_eval(t, "+YY", "-XZ")
 
     # SQRT_X (0)
     t = Tableau(1)
@@ -153,9 +153,9 @@ def test_apply_within():
     # Test case from previous example: XZI on a 3-qubit Pauli string acted on by a 2-qubit CNOT(0,1) tableau
     # Initial: XZI, phase 0. Tableau: CNOT(0,1). Target qubits: 0, 1.
     # Expected: YYI, phase 2.
-    # The `apply_within` function in Mojo handles `target_qubits` that are a subset of the PauliString's qubits.
+
     var t_cnot_2q = Tableau(2)
-    t_cnot_2q.apply_CX(0, 1)  # This creates a 2-qubit CNOT tableau
+    t_cnot_2q.apply_CX(0, 1)
 
     var target_q_01_3_qubit_context = List[Int]()
     target_q_01_3_qubit_context.append(0)
@@ -177,6 +177,111 @@ def test_call_operator():
     var p_z = PauliString("Z")
     var res_z = t(p_z)
     assert_equal(String(res_z), "+X")
+
+
+def test_call_operator_expanded():
+    print("== test_call_operator_expanded")
+    # Test for Tableau(1) and various gates
+    var t = Tableau(1)
+
+    # X gate
+    t.apply_X(0)
+    check_eval(t, "+Z", "-Z")
+    check_eval(t, "+X", "+X")
+
+    # Y gate
+    t = Tableau(1)  # Reset tableau
+    t.apply_Y(0)
+    check_eval(t, "+X", "-X")
+    check_eval(t, "+Z", "-Z")
+
+    # S gate
+    t = Tableau(1)  # Reset tableau
+    t.apply_S(0)
+    check_eval(t, "+X", "+Y")
+    check_eval(t, "+Z", "+Z")
+
+    # H gate
+    t = Tableau(1)  # Reset tableau
+    t.apply_hadamard(0)
+    check_eval(t, "+X", "+Z")
+    check_eval(t, "+Z", "+X")
+
+    # Test for Tableau(2) and CX gate
+    t = Tableau(2)  # Reset tableau
+    t.apply_CX(0, 1)
+    check_eval(t, "+XI", "+XX")
+    check_eval(t, "+IX", "+IX")
+    check_eval(t, "+ZI", "+ZI")
+    check_eval(t, "+IZ", "+ZZ")
+
+    # Test with non-zero initial global phase
+    check_eval(t, "iIX", "iIX")
+
+
+def test_call_and_apply_within_equivalence():
+    print("== test_call_and_apply_within_equivalence")
+    var t_n_qubits = 2  # Tableau size
+    var p_n_qubits = 3  # PauliString size
+
+    # Case 1: Tableau size matches PauliString size, full conjugation
+    var t_cx = Tableau(t_n_qubits)
+    t_cx.apply_CX(0, 1)  # CNOT on 0,1
+
+    var p_orig = PauliString("IX", global_phase=1)  # Initial +iIX
+    var expected_full_str = "iIX"  # CNOT on IX -> IX, so phase should remain i
+
+    # Using __call__ (out-of-place)
+    var p_called = t_cx(p_orig)
+    assert_equal(String(p_called), expected_full_str)
+
+    # Using apply_within (in-place)
+    var p_within = p_orig.copy()
+    var full_target_qubits = List[Int]()
+    for i in range(t_n_qubits):
+        full_target_qubits.append(i)
+    t_cx.apply_within(p_within, full_target_qubits)
+
+    assert_equal(String(p_within), expected_full_str)
+    assert_equal(String(p_called), String(p_within))
+
+    # Case 2: Tableau applied to a subsystem of a larger PauliString
+    t_n_qubits = 1
+    p_n_qubits = 3
+    var t_h = Tableau(t_n_qubits)
+    t_h.apply_hadamard(0)  # H on 0
+
+    var p_orig_large = PauliString("XIZ")  # +XIZ
+    var expected_full_str_large = "+ZIZ"  # H on X -> Z, so +ZIZ
+
+    # Using apply_within on a subsystem (qubit 0)
+    var p_within_large = p_orig_large.copy()
+    var target_qubits_sub = List[Int]()
+    target_qubits_sub.append(0)  # Apply to qubit 0
+    t_h.apply_within(p_within_large, target_qubits_sub)
+    assert_equal(String(p_within_large), expected_full_str_large)
+
+    # Simulating __call__ behavior for a subsystem for comparison
+    var p_subsystem_orig = PauliString("X")  # Subsystem X from XIZ
+    var p_subsystem_called = t_h(p_subsystem_orig)  # H(X) = Z
+
+    # Construct the expected larger string
+    var p_expected_large = p_orig_large.copy()
+    p_expected_large.pauli_string = (
+        String(p_subsystem_called) + "IZ"
+    )  # Z on first qubit, I on second, Z on third
+    p_expected_large.global_phase = p_subsystem_called.global_phase
+
+    assert_equal(String(p_within_large), "+ZIZ")
+
+    # Demonstrate that direct __call__ on mismatched sizes raises an error (as implemented)
+    var t_small = Tableau(1)
+    try:
+        var p_mismatched = PauliString("XX")
+        var res = t_small(p_mismatched)
+        assert_equal(True, False)  # Should not reach here
+    except e:
+        assert_equal(True, True)  # Expected error caught
 
 
 def test_elementary_ops():

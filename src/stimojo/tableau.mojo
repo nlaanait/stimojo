@@ -616,6 +616,11 @@ struct Tableau(Copyable, Movable):
         return res^
 
     fn __call__(self, p: PauliString) raises -> PauliString:
+        if p.n_qubits != self.n_qubits:
+            raise Error(
+                "PauliString # of qubits doesn't match the Tableau's # of"
+                " qubits!"
+            )
         return self.eval(p)
 
     fn apply_within(
@@ -633,7 +638,7 @@ struct Tableau(Copyable, Movable):
         # Gather
         for i in range(self.n_qubits):
             var q = target_qubits[i]
-            if q >= target.n_ops:
+            if q >= target.n_qubits:
                 raise Error("Target qubit index out of bounds")
             inp.x[i] = target.x[q]
             inp.z[i] = target.z[q]
@@ -644,7 +649,7 @@ struct Tableau(Copyable, Movable):
         # Scatter
         for i in range(self.n_qubits):
             var q = target_qubits[i]
-            if q >= target.n_ops:
+            if q >= target.n_qubits:
                 raise Error("Target qubit index out of bounds")
             target.x[q] = out.x[i]
             target.z[q] = out.z[i]
@@ -652,7 +657,7 @@ struct Tableau(Copyable, Movable):
         # Update Phase
         target.global_phase += out.global_phase
         target.pauli_string = PauliString.vec_to_string(
-            target.x, target.z, target.n_ops
+            target.x, target.z, target.n_qubits
         )
 
     # === Lifecycle ===

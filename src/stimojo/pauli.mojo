@@ -1,4 +1,5 @@
-from algorithm import parallelize, vectorize
+from memory import memset
+from algorithm import vectorize
 from collections.list import List
 from sys import num_physical_cores, simd_width_of
 from bit import pop_count
@@ -61,24 +62,24 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
     var pauli_string: String
     var x: UnsafePointer[UInt8, MutOrigin.external]
     var z: UnsafePointer[UInt8, MutOrigin.external]
-    var n_ops: Int
+    var n_qubits: Int
     var global_phase: Phase
 
     fn __init__(out self, pauli_string: String, global_phase: Int = 0) raises:
         self.pauli_string = pauli_string.upper()
-        self.n_ops = len(self.pauli_string)
-        self.x = alloc[UInt8](self.n_ops)
-        self.z = alloc[UInt8](self.n_ops)
+        self.n_qubits = len(self.pauli_string)
+        self.x = alloc[UInt8](self.n_qubits)
+        self.z = alloc[UInt8](self.n_qubits)
         self.global_phase = Phase(global_phase)
         self.from_string()
 
     fn __eq__(self, other: PauliString) -> Bool:
-        if self.n_ops != other.n_ops:
+        if self.n_qubits != other.n_qubits:
             return False
         if self.global_phase != other.global_phase:
             return False
 
-        for i in range(self.n_ops):
+        for i in range(self.n_qubits):
             if self.x[i] != other.x[i] or self.z[i] != other.z[i]:
                 return False
         return True
@@ -88,7 +89,7 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
 
     fn from_string(mut self) raises:
         s_up = self.pauli_string.as_bytes()
-        for idx in range(self.n_ops):
+        for idx in range(self.n_qubits):
             s_ = s_up[idx]
             if s_ == ord("I"):
                 self.x[idx] = 0
@@ -104,19 +105,19 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
                 self.z[idx] = 1
             else:
                 raise Error(
-                    "Encountered Invalid Pauli String!\nValid characters:\n'I(i)':"
-                    " Identity.\n'X(x)': Pauli X.\n'Y(y)': Pauli Y.\n'Z(z)':"
-                    " Pauli Z.\n Global Phase should be initialized via"
-                    " global_phase arg in base-i log."
+                    "Encountered Invalid Pauli String!\nValid"
+                    " characters:\n'I(i)': Identity.\n'X(x)': Pauli X.\n'Y(y)':"
+                    " Pauli Y.\n'Z(z)': Pauli Z.\n Global Phase should be"
+                    " initialized via global_phase arg in base-i log."
                 )
 
     @staticmethod
     fn from_xz_vectors(
         x: UnsafePointer[UInt8, MutOrigin.external],
         z: UnsafePointer[UInt8, MutOrigin.external],
-        n_ops: Int,
+        n_qubits: Int,
     ) raises -> PauliString:
-        p_str = PauliString.vec_to_string(x, z, n_ops)
+        p_str = PauliString.vec_to_string(x, z, n_qubits)
         return PauliString(
             p_str,
         )
@@ -125,9 +126,9 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
     fn vec_to_string(
         x: UnsafePointer[UInt8],
         z: UnsafePointer[UInt8],
-        n_ops: Int,
+        n_qubits: Int,
     ) -> String:
-        var result = alloc[UInt8](n_ops)
+        var result = alloc[UInt8](n_qubits)
 
         @always_inline
         @parameter
@@ -162,14 +163,14 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
 
         var str = String()
 
-        if n_ops >= simd_width:
+        if n_qubits >= simd_width:
             # use vectorized vec to pauli string conversion
-            vectorize[compare, simd_width](n_ops)
-            for idx in range(n_ops):
+            vectorize[compare, simd_width](n_qubits)
+            for idx in range(n_qubits):
                 str += chr(Int(result[idx]))
         else:
             # fall back on conditional
-            for idx in range(n_ops):
+            for idx in range(n_qubits):
                 if x[idx] == 0 and z[idx] == 0:
                     str += "I"
                 elif x[idx] == 0 and z[idx] == 1:
@@ -186,7 +187,7 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
 
     fn __str__(self) -> String:
         if self.pauli_string == String():
-            return PauliString.vec_to_string(self.x, self.z, self.n_ops)
+            return PauliString.vec_to_string(self.x, self.z, self.n_qubits)
         return String(self.global_phase) + self.pauli_string
 
     @staticmethod
@@ -213,15 +214,14 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
         return x_result, z_result
 
     fn __mul__(self, other: PauliString) raises -> PauliString:
-        var x_prod = alloc[UInt8](self.n_ops)
-        var z_prod = alloc[UInt8](self.n_ops)
+        var x_prod = alloc[UInt8](self.n_qubits)
+        var z_prod = alloc[UInt8](self.n_qubits)
         var c1_accum = alloc[UInt8](simd_width)
         var c2_accum = alloc[UInt8](simd_width)
 
         # Initialize accumulators
-        for i in range(simd_width):
-            c1_accum[i] = 0
-            c2_accum[i] = 0
+        memset(c1_accum, 0, simd_width)
+        memset(c2_accum, 0, simd_width)
 
         @parameter
         fn product[simd_width: Int](idx: Int):
@@ -242,7 +242,7 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
             c1_accum.store[width=simd_width](0, c1)
             c2_accum.store[width=simd_width](0, c2)
 
-        vectorize[product, simd_width](self.n_ops)
+        vectorize[product, simd_width](self.n_qubits)
         var c1_final = c1_accum.load[width=simd_width](0)
         var c2_final = c2_accum.load[width=simd_width](0)
 
@@ -252,7 +252,7 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
             self.global_phase + other.global_phase + Int(phase.reduce_add())
         )
 
-        prod_str = PauliString.vec_to_string(x_prod, z_prod, self.n_ops)
+        prod_str = PauliString.vec_to_string(x_prod, z_prod, self.n_qubits)
 
         c1_accum.destroy_pointee()
         c1_accum.free()
@@ -289,7 +289,7 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
             c1_accum.store[width=simd_width](0, c1)
             c2_accum.store[width=simd_width](0, c2)
 
-        vectorize[product, simd_width](self.n_ops)
+        vectorize[product, simd_width](self.n_qubits)
 
         var c1_final = c1_accum.load[width=simd_width](0)
         var c2_final = c2_accum.load[width=simd_width](0)
@@ -299,7 +299,7 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
         self.global_phase += other.global_phase + Int(phase.reduce_add())
 
         self.pauli_string = PauliString.vec_to_string(
-            self.x, self.z, self.n_ops
+            self.x, self.z, self.n_qubits
         )
 
         c1_accum.destroy_pointee()
