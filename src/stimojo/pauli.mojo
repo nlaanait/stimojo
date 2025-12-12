@@ -1,12 +1,14 @@
 from memory import memset
+from math import align_up
 from algorithm import vectorize
 from collections.list import List
 from sys import num_physical_cores, simd_width_of
 from bit import pop_count
 
 
-alias simd_width = simd_width_of[DType.uint8]()
-alias int_type = DType.uint8
+alias int_type = DType.uint64
+alias simd_width = simd_width_of[int_type]()
+alias bit_width = 64
 
 
 struct Phase(
@@ -60,18 +62,30 @@ struct Phase(
 
 struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
     var pauli_string: String
-    var x: UnsafePointer[UInt8, MutOrigin.external]
-    var z: UnsafePointer[UInt8, MutOrigin.external]
+    var x: UnsafePointer[Scalar[int_type], MutOrigin.external]
+    var z: UnsafePointer[Scalar[int_type], MutOrigin.external]
     var n_qubits: Int
+    var n_words: Int
     var global_phase: Phase
 
     fn __init__(out self, pauli_string: String, global_phase: Int = 0) raises:
+        # parse pauli string
         self.pauli_string = pauli_string.upper()
-        self.n_qubits = len(self.pauli_string)
-        self.x = alloc[UInt8](self.n_qubits)
-        self.z = alloc[UInt8](self.n_qubits)
-        self.global_phase = Phase(global_phase)
         self.from_string()
+
+        # set initial phase
+        self.global_phase = Phase(global_phase)
+
+        # allocate bit-packed, xz encoding vectors
+        self.n_qubits = len(self.pauli_string)
+        self.n_words = (self.n_qubits + bit_width - 1) // bit_width
+        var alloc_size = align_up(self.n_words, simd_width)
+        self.x = alloc[Scalar[int_type]](self.n_qubits)
+        self.z = alloc[Scalar[int_type]](self.n_qubits)
+
+        # initialize to Identity PauliString
+        memset(self.x, 0, alloc_size)
+        memset(self.z, 0, alloc_size)
 
     fn __eq__(self, other: PauliString) -> Bool:
         if self.n_qubits != other.n_qubits:
