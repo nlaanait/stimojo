@@ -1,71 +1,123 @@
-from memory import memset
+from memory import memset, memcpy, UnsafePointer, alloc
 from math import align_up, log2
 from algorithm import vectorize
 from collections.list import List
-from sys import num_physical_cores, simd_width_of
+from sys import simd_width_of
 from bit import pop_count
 
-
+# compile-time parameters for XZEncoding bit-packing data layout
 alias int_type = DType.uint64
+alias bit_width = 64  # must match int_type
+alias bit_exp = 6  # must be equal to log2(bit_width)
 alias simd_width = simd_width_of[int_type]()
-alias bit_width = 64
-alias bit_exp = 6  # log2(bit_width)
 
 
-struct XZEncoding(Copyable, Movable):
+struct XZEncoding(
+    Copyable, EqualityComparable, ImplicitlyCopyable, Movable, Stringable
+):
     var n_qubits: Int
     var n_words: Int
+    # int data type is specifed at compile-time
     var x: UnsafePointer[Scalar[int_type], MutOrigin.external]
     var z: UnsafePointer[Scalar[int_type], MutOrigin.external]
 
     fn __init__(out self, n_qubits: Int):
-        # allocate bit-packed, xz encoding vectors
+        # allocate x,z ptr up to simd_width
         self.n_qubits = n_qubits
         self.n_words = (self.n_qubits + bit_width - 1) // bit_width
-
-        # allocate up to simd_width and pad with 0 (next step)
         var alloc_size = align_up(self.n_words, simd_width)
-        self.x = alloc[Scalar[int_type]](self.n_qubits)
-        self.z = alloc[Scalar[int_type]](self.n_qubits)
 
-        # initialize to Identity PauliString
+        self.x = alloc[Scalar[int_type]](alloc_size)
+        self.z = alloc[Scalar[int_type]](alloc_size)
+
+        # set x,z ptr to identity PauliString
         memset(self.x, 0, alloc_size)
         memset(self.z, 0, alloc_size)
 
-    fn __setitem__(self, idx: Int, val: Tuple[Int]):
-        # find word index, bit index, and selector (mask)
-        var word_idx = idx >> bit_exp  # i.e idx // 2**bit_exp
-        var bit_idx = idx & (bit_width - 1)  # i.e. idx % (bit_width - 1)
+    fn __str__(self) -> String:
+        var s = String()
+        for idx in range(self.n_qubits):
+            var x_bit, z_bit = self[idx]
+            if not x_bit and not z_bit:
+                s += "I"
+            elif x_bit and not z_bit:
+                s += "X"
+            elif not x_bit and z_bit:
+                s += "Z"
+            elif x_bit and z_bit:
+                s += "Y"
+        return s
+
+    fn __copyinit__(out self, other: XZEncoding):
+        self.n_qubits = other.n_qubits
+        self.n_words = other.n_words
+        var alloc_size = align_up(self.n_words, simd_width)
+        self.x = alloc[Scalar[int_type]](alloc_size)
+        self.z = alloc[Scalar[int_type]](alloc_size)
+        memcpy(dest=self.x, src=other.x, count=alloc_size)
+        memcpy(dest=self.z, src=other.z, count=alloc_size)
+
+    fn __moveinit__(out self, deinit other: XZEncoding):
+        self.n_qubits = other.n_qubits
+        self.n_words = other.n_words
+        self.x = other.x
+        self.z = other.z
+
+    fn __del__(deinit self):
+        if self.x:
+            self.x.destroy_pointee()
+            self.x.free()
+        if self.z:
+            self.z.destroy_pointee()
+            self.z.free()
+
+    fn __setitem__(
+        self, idx: Int, val: Tuple[Scalar[int_type], Scalar[int_type]]
+    ):
+        # find integer index (word_idx) and offset (bit_idx)
+        var word_idx = idx >> bit_exp
+        var bit_idx = idx & (bit_width - 1)
         var mask = Scalar[int_type](1) << bit_idx
 
-        # load word from x ptr and modify selected bit
         var current_word_x = self.x.load(word_idx)
         if val[0] == 1:
             current_word_x |= mask  # set bit
         else:
-            current_word_x &= ~mask  # clear bit
-        # update word
+            current_word_x &= ~mask  # reset bit
         self.x.store(word_idx, current_word_x)
 
-        # load word from z ptr and modify selected bit
+        # repeat for z ptr
         var current_word_z = self.z.load(word_idx)
         if val[1] == 1:
             current_word_z |= mask
         else:
             current_word_z &= ~mask
-        # update word
         self.z.store(word_idx, current_word_z)
 
     fn __getitem__(self, idx: Int) -> Tuple[Scalar[int_type], Scalar[int_type]]:
-        # find word index and bit index
+        # find integer index (word_idx) and offset (bit_idx)
         var word_idx = idx >> bit_exp
         var bit_idx = idx & (bit_width - 1)
 
-        # read LSB values of x ptr and z ptr
+        # return LSB
         var x_val = (self.x[word_idx] >> bit_idx) & 1
         var z_val = (self.z[word_idx] >> bit_idx) & 1
 
-        return (Scalar[int_type](x_val), Scalar[int_type](z_val))
+        return (x_val, z_val)
+
+    fn __eq__(self, other: XZEncoding) -> Bool:
+        if self.n_qubits != other.n_qubits:
+            return False
+
+        for i in range(self.n_words):
+            if self.x[i] != other.x[i]:
+                return False
+            if self.z[i] != other.z[i]:
+                return False
+        return True
+
+    fn __ne__(self, other: XZEncoding) -> Bool:
+        return not (self == other)
 
     @always_inline
     fn load[
@@ -96,12 +148,8 @@ struct Phase(
     var log_value: Int
 
     fn __init__(out self, value: Int) raises:
-        self.log_value = value
-        if not (self.log_value in [0, 1, 2, 3]):
-            raise Error(
-                "Phase should be given in log-i base (mod 4):\n0 -->1, 1-->i, 2"
-                " -->-1, 3 -->-i"
-            )
+        self.log_value = value % 4
+        self._validate()
 
     fn __str__(self) -> String:
         var str_phase = String()
@@ -135,56 +183,68 @@ struct Phase(
     fn __ne__(self, other: Phase) -> Bool:
         return not (self == other)
 
+    fn _validate(self) raises:
+        if not (self.log_value in [0, 1, 2, 3]):
+            raise Error(
+                "Phase should be given in log-i base (mod 4):\n0 -->1, 1-->i, 2"
+                " -->-1, 3 -->-i"
+            )
 
-struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
+
+struct PauliString(
+    Copyable, EqualityComparable, ImplicitlyCopyable, Movable, Stringable
+):
     var pauli_string: String
     var xz_encoding: XZEncoding
     var n_qubits: Int
-    var n_words: Int
     var global_phase: Phase
 
     fn __init__(out self, pauli_string: String, global_phase: Int = 0) raises:
-        # set pauli string
-        self.pauli_string = pauli_string.upper()
         self.n_qubits = len(pauli_string)
-
-        # set initial phase
-        self.global_phase = Phase(global_phase)
-
-        # initialize xz-encoding vectors
         self.xz_encoding = XZEncoding(n_qubits=self.n_qubits)
-        self.from_string()
+        self.global_phase = Phase(global_phase)
+        # store pauli string then xz_encoding
+        self.pauli_string = pauli_string.upper()
+        self.xz_encode()
+
+    fn __copyinit__(out self, other: PauliString):
+        self.pauli_string = other.pauli_string
+        self.n_qubits = other.n_qubits
+        self.xz_encoding = other.xz_encoding
+        self.global_phase = other.global_phase
+
+    fn __moveinit__(out self, deinit other: PauliString):
+        self.pauli_string = other.pauli_string
+        self.n_qubits = other.n_qubits
+        self.xz_encoding = other.xz_encoding^
+        self.global_phase = other.global_phase^
 
     fn __eq__(self, other: PauliString) -> Bool:
         if self.n_qubits != other.n_qubits:
             return False
         if self.global_phase != other.global_phase:
             return False
-
-        for i in range(self.n_qubits):
-            if self.x[i] != other.x[i] or self.z[i] != other.z[i]:
-                return False
-        return True
+        return self.xz_encoding == other.xz_encoding
 
     fn __ne__(self, other: PauliString) -> Bool:
         return not (self == other)
 
-    fn from_string(mut self) raises:
-        s_up = self.pauli_string.as_bytes()
+    fn xz_encode(mut self) raises:
+        var s_up = self.pauli_string.as_bytes()
         for idx in range(self.n_qubits):
-            s_ = s_up[idx]
-            if s_ == ord("I"):
-                self.x[idx] = 0
-                self.z[idx] = 0
-            elif s_ == ord("Z"):
-                self.x[idx] = 0
-                self.z[idx] = 1
-            elif s_ == ord("X"):
-                self.x[idx] = 1
-                self.z[idx] = 0
-            elif s_ == ord("Y"):
-                self.x[idx] = 1
-                self.z[idx] = 1
+            var char = s_up[idx]
+            if char == ord("I"):
+                x_val = 0
+                z_val = 0
+            elif char == ord("Z"):
+                x_val = 0
+                z_val = 1
+            elif char == ord("X"):
+                x_val = 1
+                z_val = 0
+            elif char == ord("Y"):
+                x_val = 1
+                z_val = 1
             else:
                 raise Error(
                     "Encountered Invalid Pauli String!\nValid"
@@ -192,87 +252,29 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
                     " Pauli Y.\n'Z(z)': Pauli Z.\n Global Phase should be"
                     " initialized via global_phase arg in base-i log."
                 )
+            self.xz_encoding[idx] = (x_val, z_val)
 
     @staticmethod
-    fn from_xz_vectors(
-        x: UnsafePointer[UInt8, MutOrigin.external],
-        z: UnsafePointer[UInt8, MutOrigin.external],
+    fn from_xz_encoding(
+        x: UnsafePointer[Scalar[int_type], MutOrigin.external],
+        z: UnsafePointer[Scalar[int_type], MutOrigin.external],
         n_qubits: Int,
+        global_phase: Optional[Int],
     ) raises -> PauliString:
-        p_str = PauliString.vec_to_string(x, z, n_qubits)
-        return PauliString(
-            p_str,
+        var p = PauliString(
+            "I" * n_qubits, global_phase=global_phase.or_else(0)
         )
-
-    @staticmethod
-    fn vec_to_string(
-        x: UnsafePointer[UInt8],
-        z: UnsafePointer[UInt8],
-        n_qubits: Int,
-    ) -> String:
-        var result = alloc[UInt8](n_qubits)
-
-        @always_inline
-        @parameter
-        fn compare[simd_width: Int](idx: Int):
-            # define SIMD vectors for X,Y,Z,I and all 0's/1's bitstring
-            var zeros = SIMD[DType.uint8, simd_width](0)
-            var ones = SIMD[DType.uint8, simd_width](1)
-            var I_vals = SIMD[DType.uint8, simd_width](ord("I"))
-            var X_vals = SIMD[DType.uint8, simd_width](ord("X"))
-            var Y_vals = SIMD[DType.uint8, simd_width](ord("Y"))
-            var Z_vals = SIMD[DType.uint8, simd_width](ord("Z"))
-
-            # load data from x and z vectors
-            var x_chunk = x.load[width=simd_width](idx)
-            var z_chunk = z.load[width=simd_width](idx)
-
-            # get boolean mask for each (x,z) tuple to match XYZI
-            var I_cond = x_chunk.eq(zeros) & z_chunk.eq(zeros)
-            var X_cond = x_chunk.eq(ones) & z_chunk.eq(zeros)
-            var Y_cond = x_chunk.eq(ones) & z_chunk.eq(ones)
-            var Z_cond = x_chunk.eq(zeros) & z_chunk.eq(ones)
-
-            # use boolean mask to fill otherwise fill with zeros
-            var Y_result = Y_cond.select(Y_vals, zeros)
-            var I_result = I_cond.select(I_vals, zeros)
-            var X_result = X_cond.select(X_vals, zeros)
-            var Z_result = Z_cond.select(Z_vals, zeros)
-
-            # add up and store back into result
-            var final = Y_result + X_result + Z_result + I_result
-            result.store[width=simd_width](idx, final)
-
-        var str = String()
-
-        if n_qubits >= simd_width:
-            # use vectorized vec to pauli string conversion
-            vectorize[compare, simd_width](n_qubits)
-            for idx in range(n_qubits):
-                str += chr(Int(result[idx]))
-        else:
-            # fall back on conditional
-            for idx in range(n_qubits):
-                if x[idx] == 0 and z[idx] == 0:
-                    str += "I"
-                elif x[idx] == 0 and z[idx] == 1:
-                    str += "Z"
-                elif x[idx] == 1 and z[idx] == 1:
-                    str += "Y"
-                elif x[idx] == 1 and z[idx] == 0:
-                    str += "X"
-
-        result.destroy_pointee()
-        result.free()
-
-        return str
+        var num_words = (n_qubits + bit_width - 1) // bit_width
+        memcpy(dest=p.xz_encoding.x, src=x, count=num_words)
+        memcpy(dest=p.xz_encoding.z, src=z, count=num_words)
+        p.pauli_string = String(p.xz_encoding)
+        return p
 
     fn __str__(self) -> String:
-        if self.pauli_string == String():
-            return PauliString.vec_to_string(self.x, self.z, self.n_qubits)
-        return String(self.global_phase) + self.pauli_string
+        return String(self.global_phase) + String(self.xz_encoding)
 
     @staticmethod
+    @always_inline
     fn compute_xor_vector[
         simd_width: Int
     ](
@@ -296,103 +298,42 @@ struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
         return x_result, z_result
 
     fn __mul__(self, other: PauliString) raises -> PauliString:
-        var x_prod = alloc[UInt8](self.n_qubits)
-        var z_prod = alloc[UInt8](self.n_qubits)
-        var c1_accum = alloc[UInt8](simd_width)
-        var c2_accum = alloc[UInt8](simd_width)
-
-        # Initialize accumulators
-        memset(c1_accum, 0, simd_width)
-        memset(c2_accum, 0, simd_width)
-
-        @parameter
-        fn product[simd_width: Int](idx: Int):
-            var c1 = c1_accum.load[width=simd_width](0)
-            var c2 = c2_accum.load[width=simd_width](0)
-
-            var x = self.x.load[width=simd_width](idx)
-            var z = self.z.load[width=simd_width](idx)
-
-            var other_x = other.x.load[width=simd_width](idx)
-            var other_z = other.z.load[width=simd_width](idx)
-
-            x_result, z_result = PauliString.compute_xor_vector(
-                c1, c2, x, z, other_x, other_z
-            )
-            x_prod.store[width=simd_width](idx, x_result)
-            z_prod.store[width=simd_width](idx, z_result)
-            c1_accum.store[width=simd_width](0, c1)
-            c2_accum.store[width=simd_width](0, c2)
-
-        vectorize[product, simd_width](self.n_qubits)
-        var c1_final = c1_accum.load[width=simd_width](0)
-        var c2_final = c2_accum.load[width=simd_width](0)
-
-        phase = (pop_count(c1_final) + 2 * pop_count(c2_final)) % 4
-
-        global_phase = (
-            self.global_phase + other.global_phase + Int(phase.reduce_add())
-        )
-
-        prod_str = PauliString.vec_to_string(x_prod, z_prod, self.n_qubits)
-
-        c1_accum.destroy_pointee()
-        c1_accum.free()
-        c2_accum.destroy_pointee()
-        c2_accum.free()
-
-        return PauliString(prod_str, global_phase=global_phase.log_value)
+        var res = self
+        res.prod(other)
+        return res
 
     fn prod(mut self, other: PauliString) raises:
-        var c1_accum = alloc[UInt8](simd_width)
-        var c2_accum = alloc[UInt8](simd_width)
-
-        # Initialize accumulators
-        for i in range(simd_width):
-            c1_accum[i] = 0
-            c2_accum[i] = 0
+        var accum_ptr = alloc[UInt64](2 * simd_width)
+        memset(accum_ptr, 0, 2 * simd_width)
 
         @parameter
-        fn product[simd_width: Int](idx: Int):
-            var c1 = c1_accum.load[width=simd_width](0)
-            var c2 = c2_accum.load[width=simd_width](0)
+        fn vec_body[width: Int](idx: Int):
+            var c1 = accum_ptr.load[width=width](0)
+            var c2 = accum_ptr.load[width=width](simd_width)
+            var x, z = self.xz_encoding.load[width](idx)
+            var ox, oz = other.xz_encoding.load[width](idx)
 
-            var x = self.x.load[width=simd_width](idx)
-            var z = self.z.load[width=simd_width](idx)
-
-            var other_x = other.x.load[width=simd_width](idx)
-            var other_z = other.z.load[width=simd_width](idx)
-
-            x_result, z_result = PauliString.compute_xor_vector(
-                c1, c2, x, z, other_x, other_z
+            var res_x, res_z = PauliString.compute_xor_vector(
+                c1, c2, x, z, ox, oz
             )
-            self.x.store[width=simd_width](idx, x_result)
-            self.z.store[width=simd_width](idx, z_result)
-            c1_accum.store[width=simd_width](0, c1)
-            c2_accum.store[width=simd_width](0, c2)
 
-        vectorize[product, simd_width](self.n_qubits)
+            self.xz_encoding.store[width](idx, (res_x, res_z))
 
-        var c1_final = c1_accum.load[width=simd_width](0)
-        var c2_final = c2_accum.load[width=simd_width](0)
+            accum_ptr.store[width=width](0, c1)
+            accum_ptr.store[width=width](simd_width, c2)
 
-        phase = (pop_count(c1_final) + 2 * pop_count(c2_final)) % 4
+        vectorize[vec_body, simd_width](self.xz_encoding.n_words)
 
-        self.global_phase += other.global_phase + Int(phase.reduce_add())
+        var c1_simd = accum_ptr.load[width=simd_width](0)
+        var c2_simd = accum_ptr.load[width=simd_width](simd_width)
+        var total_c1 = 0
+        var total_c2 = 0
+        for i in range(simd_width):
+            total_c1 += Int(pop_count(c1_simd[i]))
+            total_c2 += Int(pop_count(c2_simd[i]))
 
-        self.pauli_string = PauliString.vec_to_string(
-            self.x, self.z, self.n_qubits
-        )
+        var phase_change = total_c1 + 2 * total_c2
+        self.global_phase += other.global_phase + phase_change
 
-        c1_accum.destroy_pointee()
-        c1_accum.free()
-        c2_accum.destroy_pointee()
-        c2_accum.free()
-
-    fn __del__(deinit self):
-        if self.x:
-            self.x.destroy_pointee()
-            self.x.free()
-        if self.z:
-            self.z.destroy_pointee()
-            self.z.free()
+        accum_ptr.destroy_pointee()
+        accum_ptr.free()
