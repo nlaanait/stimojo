@@ -1,5 +1,5 @@
 from memory import memset
-from math import align_up
+from math import align_up, log2
 from algorithm import vectorize
 from collections.list import List
 from sys import num_physical_cores, simd_width_of
@@ -9,6 +9,85 @@ from bit import pop_count
 alias int_type = DType.uint64
 alias simd_width = simd_width_of[int_type]()
 alias bit_width = 64
+alias bit_exp = 6  # log2(bit_width)
+
+
+struct XZEncoding(Copyable, Movable):
+    var n_qubits: Int
+    var n_words: Int
+    var x: UnsafePointer[Scalar[int_type], MutOrigin.external]
+    var z: UnsafePointer[Scalar[int_type], MutOrigin.external]
+
+    fn __init__(out self, n_qubits: Int):
+        # allocate bit-packed, xz encoding vectors
+        self.n_qubits = n_qubits
+        self.n_words = (self.n_qubits + bit_width - 1) // bit_width
+
+        # allocate up to simd_width and pad with 0 (next step)
+        var alloc_size = align_up(self.n_words, simd_width)
+        self.x = alloc[Scalar[int_type]](self.n_qubits)
+        self.z = alloc[Scalar[int_type]](self.n_qubits)
+
+        # initialize to Identity PauliString
+        memset(self.x, 0, alloc_size)
+        memset(self.z, 0, alloc_size)
+
+    fn __setitem__(self, idx: Int, val: Tuple[Int]):
+        # find word index, bit index, and selector (mask)
+        var word_idx = idx >> bit_exp  # i.e idx // 2**bit_exp
+        var bit_idx = idx & (bit_width - 1)  # i.e. idx % (bit_width - 1)
+        var mask = Scalar[int_type](1) << bit_idx
+
+        # load word from x ptr and modify selected bit
+        var current_word_x = self.x.load(word_idx)
+        if val[0] == 1:
+            current_word_x |= mask  # set bit
+        else:
+            current_word_x &= ~mask  # clear bit
+        # update word
+        self.x.store(word_idx, current_word_x)
+
+        # load word from z ptr and modify selected bit
+        var current_word_z = self.z.load(word_idx)
+        if val[1] == 1:
+            current_word_z |= mask
+        else:
+            current_word_z &= ~mask
+        # update word
+        self.z.store(word_idx, current_word_z)
+
+    fn __getitem__(self, idx: Int) -> Tuple[Scalar[int_type], Scalar[int_type]]:
+        # find word index and bit index
+        var word_idx = idx >> bit_exp
+        var bit_idx = idx & (bit_width - 1)
+
+        # read LSB values of x ptr and z ptr
+        var x_val = (self.x[word_idx] >> bit_idx) & 1
+        var z_val = (self.z[word_idx] >> bit_idx) & 1
+
+        return (Scalar[int_type](x_val), Scalar[int_type](z_val))
+
+    @always_inline
+    fn load[
+        simd_width: Int
+    ](self, idx: Int) -> Tuple[
+        SIMD[int_type, simd_width], SIMD[int_type, simd_width]
+    ]:
+        return (
+            self.x.load[width=simd_width](idx),
+            self.z.load[width=simd_width](idx),
+        )
+
+    @always_inline
+    fn store[
+        simd_width: Int
+    ](
+        self,
+        idx: Int,
+        val: Tuple[SIMD[int_type, simd_width], SIMD[int_type, simd_width]],
+    ):
+        self.x.store[width=simd_width](idx, val[0])
+        self.z.store[width=simd_width](idx, val[1])
 
 
 struct Phase(
@@ -17,8 +96,12 @@ struct Phase(
     var log_value: Int
 
     fn __init__(out self, value: Int) raises:
-        self.log_value = value % 4
-        self._validate()
+        self.log_value = value
+        if not (self.log_value in [0, 1, 2, 3]):
+            raise Error(
+                "Phase should be given in log-i base (mod 4):\n0 -->1, 1-->i, 2"
+                " -->-1, 3 -->-i"
+            )
 
     fn __str__(self) -> String:
         var str_phase = String()
@@ -52,40 +135,25 @@ struct Phase(
     fn __ne__(self, other: Phase) -> Bool:
         return not (self == other)
 
-    fn _validate(self) raises:
-        if not (self.log_value in [0, 1, 2, 3]):
-            raise Error(
-                "Phase should be given in log-i base (mod 4):\n0 -->1, 1-->i, 2"
-                " -->-1, 3 -->-i, ..."
-            )
-
 
 struct PauliString(Copyable, EqualityComparable, Movable, Stringable):
     var pauli_string: String
-    var x: UnsafePointer[Scalar[int_type], MutOrigin.external]
-    var z: UnsafePointer[Scalar[int_type], MutOrigin.external]
+    var xz_encoding: XZEncoding
     var n_qubits: Int
     var n_words: Int
     var global_phase: Phase
 
     fn __init__(out self, pauli_string: String, global_phase: Int = 0) raises:
-        # parse pauli string
+        # set pauli string
         self.pauli_string = pauli_string.upper()
-        self.from_string()
+        self.n_qubits = len(pauli_string)
 
         # set initial phase
         self.global_phase = Phase(global_phase)
 
-        # allocate bit-packed, xz encoding vectors
-        self.n_qubits = len(self.pauli_string)
-        self.n_words = (self.n_qubits + bit_width - 1) // bit_width
-        var alloc_size = align_up(self.n_words, simd_width)
-        self.x = alloc[Scalar[int_type]](self.n_qubits)
-        self.z = alloc[Scalar[int_type]](self.n_qubits)
-
-        # initialize to Identity PauliString
-        memset(self.x, 0, alloc_size)
-        memset(self.z, 0, alloc_size)
+        # initialize xz-encoding vectors
+        self.xz_encoding = XZEncoding(n_qubits=self.n_qubits)
+        self.from_string()
 
     fn __eq__(self, other: PauliString) -> Bool:
         if self.n_qubits != other.n_qubits:
