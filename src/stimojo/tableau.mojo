@@ -111,9 +111,21 @@ struct Tableau(Copyable, Movable):
         if not self.is_pauli_product():
             raise Error("The Tableau isn't equivalent to a Pauli product.")
 
-        p = PauliString.from_xz_vectors(
-            self.xs().signs, self.zs().signs, self.n_qubits
-        )
+        var p = PauliString("I" * self.n_qubits)
+        var xs_signs = self.xs().signs
+        var zs_signs = self.zs().signs
+
+        for k in range(self.n_qubits):
+             # Sign of X stabilizer -> Z component
+             # Sign of Z stabilizer -> X component
+             var z_val = xs_signs[k]
+             var x_val = zs_signs[k]
+             p.xz_encoding[k] = (
+                 Scalar[DType.uint64](x_val),
+                 Scalar[DType.uint64](z_val)
+             )
+
+        p.pauli_string = String(p.xz_encoding)
         return p^
 
     fn xs(self) -> TableauHalf:
@@ -429,13 +441,18 @@ struct Tableau(Copyable, Movable):
 
         for c in range(n):
             var idx = c + row * n
-            p.x[c] = xt_ptr[idx]
-            p.z[c] = zt_ptr[idx]
+            p.xz_encoding[c] = (
+                Scalar[DType.uint64](xt_ptr[idx]),
+                Scalar[DType.uint64](zt_ptr[idx]),
+            )
 
         if signs_ptr[row] == 1:
             p.global_phase = Phase(2)  # -1 phase
         else:
             p.global_phase = Phase(0)
+
+        # Update string representation
+        p.pauli_string = String(p.xz_encoding)
 
         return p^
 
@@ -447,8 +464,9 @@ struct Tableau(Copyable, Movable):
 
         for c in range(n):
             var idx = c + row * n
-            xt_ptr[idx] = p.x[c]
-            zt_ptr[idx] = p.z[c]
+            var xz = p.xz_encoding[c]
+            xt_ptr[idx] = xz[0].cast[DType.uint8]()
+            zt_ptr[idx] = xz[1].cast[DType.uint8]()
 
         if p.global_phase == Phase(2):
             signs_ptr[row] = 1
@@ -597,8 +615,9 @@ struct Tableau(Copyable, Movable):
         res.global_phase = p.global_phase.copy()
 
         for k in range(self.n_qubits):
-            var x = p.x[k]
-            var z = p.z[k]
+            var xz = p.xz_encoding[k]
+            var x = xz[0]
+            var z = xz[1]
             if x == 1 and z == 0:
                 var row = self._row_to_pauli(0, k)
                 res.prod(row)
@@ -640,8 +659,7 @@ struct Tableau(Copyable, Movable):
             var q = target_qubits[i]
             if q >= target.n_qubits:
                 raise Error("Target qubit index out of bounds")
-            inp.x[i] = target.x[q]
-            inp.z[i] = target.z[q]
+            inp.xz_encoding[i] = target.xz_encoding[q]
 
         # Eval
         var out = self.eval(inp)
@@ -651,14 +669,11 @@ struct Tableau(Copyable, Movable):
             var q = target_qubits[i]
             if q >= target.n_qubits:
                 raise Error("Target qubit index out of bounds")
-            target.x[q] = out.x[i]
-            target.z[q] = out.z[i]
+            target.xz_encoding[q] = out.xz_encoding[i]
 
         # Update Phase
         target.global_phase += out.global_phase
-        target.pauli_string = PauliString.vec_to_string(
-            target.x, target.z, target.n_qubits
-        )
+        target.pauli_string = String(target.xz_encoding)
 
     # === Lifecycle ===
 
