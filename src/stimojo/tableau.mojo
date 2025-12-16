@@ -3,7 +3,7 @@ from algorithm import vectorize
 from utils import Index
 from stimojo.pauli import PauliString, Phase, int_type, simd_width
 from collections.list import List
-from stimojo.bit_tensor import BitTensor, BitMatrix
+from stimojo.bit_tensor import BitVector, BitMatrix
 from math import align_up
 
 
@@ -13,22 +13,22 @@ struct Tableau(Copyable, Movable):
     # Storage using BitMatrix
     var _xs_xt: BitMatrix
     var _xs_zt: BitMatrix
-    var _xs_signs: BitTensor
+    var _xs_signs: BitVector
 
     var _zs_xt: BitMatrix
     var _zs_zt: BitMatrix
-    var _zs_signs: BitTensor
+    var _zs_signs: BitVector
 
     fn __init__(out self, n_qubits: Int):
         self.n_qubits = n_qubits
 
         self._xs_xt = BitMatrix(n_qubits, n_qubits)
         self._xs_zt = BitMatrix(n_qubits, n_qubits)
-        self._xs_signs = BitTensor(n_qubits)
+        self._xs_signs = BitVector(n_qubits)
 
         self._zs_xt = BitMatrix(n_qubits, n_qubits)
         self._zs_zt = BitMatrix(n_qubits, n_qubits)
-        self._zs_signs = BitTensor(n_qubits)
+        self._zs_signs = BitVector(n_qubits)
 
         for k in range(n_qubits):
             self._xs_xt[k, k] = True
@@ -300,12 +300,6 @@ struct Tableau(Copyable, Movable):
     fn _swap_x_z_for_qubit(mut self, q: Int):
         var num_words = self._xs_xt.n_words_per_row
 
-        # Row q in XS and ZS is what we need to swap columns of?
-        # No, prepending H_XZ swaps the operator associated with generator q.
-        # It swaps X_q and Z_q operators of the tableau.
-        # This means swapping row `q` of XT/ZT matrices between XS and ZS blocks.
-        # i.e. swapping XS[q] and ZS[q].
-
         for w in range(num_words):
             var v_xs_xt = self._xs_xt.word(q, w)
             var v_zs_xt = self._zs_xt.word(q, w)
@@ -357,13 +351,7 @@ struct Tableau(Copyable, Movable):
             if source_half == 0:
                 self._xs_xt.xor_row(target_row, source_row)
                 self._xs_zt.xor_row(target_row, source_row)
-            else:  # source_half == 1 (zs)
-                # We need to XOR row from ZS into XS
-                # But xor_row works within same matrix? No, implementation of BitMatrix xor_row takes row indices.
-                # If we want cross-matrix XOR, we need manual loop.
-                # Or update BitMatrix to support `xor_row_from(other_matrix, src_row, tgt_row)`.
-                # Let's check `BitMatrix.xor_row`. It assumes `self`.
-                # We need to manually loop here because source and target matrices differ.
+            else:  
                 var num_words = self._xs_xt.n_words_per_row
                 for w in range(num_words):
                     var s_xt = self._zs_xt.word(source_row, w)
@@ -373,9 +361,8 @@ struct Tableau(Copyable, Movable):
                     var s_zt = self._zs_zt.word(source_row, w)
                     var t_zt = self._xs_zt.word(target_row, w)
                     self._xs_zt.set_word(target_row, w, t_zt ^ s_zt)
-        else:  # target_half == 1 (zs)
+        else:  
             if source_half == 0:
-                # XOR row from XS into ZS
                 var num_words = self._xs_xt.n_words_per_row
                 for w in range(num_words):
                     var s_xt = self._xs_xt.word(source_row, w)
@@ -385,7 +372,7 @@ struct Tableau(Copyable, Movable):
                     var s_zt = self._xs_zt.word(source_row, w)
                     var t_zt = self._zs_zt.word(target_row, w)
                     self._zs_zt.set_word(target_row, w, t_zt ^ s_zt)
-            else:  # source_half == 1 (zs)
+            else:  
                 self._zs_xt.xor_row(target_row, source_row)
                 self._zs_zt.xor_row(target_row, source_row)
 

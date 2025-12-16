@@ -10,7 +10,7 @@ alias bit_width = 64
 alias bit_exp = 6
 alias simd_width = simd_width_of[int_type]()
 
-struct BitTensor(
+struct BitVector(
     Copyable, EqualityComparable, ImplicitlyCopyable, Movable, Stringable
 ):
     alias layout_type = Layout.row_major(UNKNOWN_VALUE)
@@ -30,7 +30,7 @@ struct BitTensor(
         var rt_layout = RuntimeLayout[Self.layout_type].row_major(Index(alloc_size))
         self._data = LayoutTensor[int_type, Self.layout_type, MutOrigin.external](ptr, rt_layout)
 
-    fn __copyinit__(out self, other: BitTensor):
+    fn __copyinit__(out self, other: BitVector):
         self.num_bits = other.num_bits
         self.num_words = other.num_words
         var alloc_size = align_up(self.num_words, simd_width)
@@ -43,7 +43,7 @@ struct BitTensor(
         
         self._data = LayoutTensor[int_type, Self.layout_type, MutOrigin.external](ptr, rt_layout)
 
-    fn __moveinit__(out self, deinit other: BitTensor):
+    fn __moveinit__(out self, deinit other: BitVector):
         self.num_bits = other.num_bits
         self.num_words = other.num_words
         self._data = other._data
@@ -70,7 +70,7 @@ struct BitTensor(
             current_word &= ~mask
         self._data[word_idx] = current_word
 
-    fn __eq__(self, other: BitTensor) -> Bool:
+    fn __eq__(self, other: BitVector) -> Bool:
         if self.num_bits != other.num_bits:
             return False
         
@@ -80,7 +80,7 @@ struct BitTensor(
                 return False
         return True
 
-    fn __ne__(self, other: BitTensor) -> Bool:
+    fn __ne__(self, other: BitVector) -> Bool:
         return not (self == other)
 
     fn __str__(self) -> String:

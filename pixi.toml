@@ -11,11 +11,12 @@ example_pauli_string = "mojo run -I src examples/pauli_string.mojo"
 example_tableau = "mojo run -I src examples/tableau.mojo"
 example_tableau_conjugation = "mojo run -I src examples/tableau_conjugation.mojo"
 test_pauli_string = "mojo run -I src test/stimojo/test_pauli_string.mojo"
+test_bit_tensor = "mojo run -I src test/stimojo/test_bit_tensor.mojo"
 test_ops = "mojo run -I src test/stimojo/test_ops.mojo"
 test_memory_safety = "mojo run -I src test/stimojo/test_memory_safety.mojo"
 test_tableau = "mojo run -I src test/stimojo/test_tableau.mojo"
 test_tableau_ops = "mojo run -I src test/stimojo/test_tableau_ops.mojo"
-tests = { depends-on = ["test_pauli_string", "test_ops", "test_memory_safety", "test_tableau", "test_tableau_ops"] }
+tests = { depends-on = ["test_pauli_string", "test_bit_tensor", "test_ops", "test_memory_safety", "test_tableau", "test_tableau_ops"] }
 format = "mojo format src  test examples benchmarks"
 
 [dependencies]

@@ -7,13 +7,13 @@ from bit import pop_count
 
 from layout import Layout, LayoutTensor, RuntimeLayout, UNKNOWN_VALUE
 from utils import Index
-from .bit_tensor import BitTensor
+from .bit_tensor import BitVector
 
 # compile-time parameters for XZEncoding bit-packing data layout
-alias int_type = DType.uint64
-alias bit_width = 64  # must match int_type
-alias bit_exp = 6  # must be equal to log2(bit_width)
-alias simd_width = simd_width_of[int_type]()
+comptime int_type = DType.uint64
+comptime bit_width = 64  # must match int_type
+comptime bit_exp = 6  # must be equal to log2(bit_width)
+comptime simd_width = simd_width_of[int_type]()
 
 
 struct XZEncoding(
@@ -21,14 +21,14 @@ struct XZEncoding(
 ):
     var n_qubits: Int
     var n_words: Int
-    var x: BitTensor
-    var z: BitTensor
+    var x: BitVector
+    var z: BitVector
 
     fn __init__(out self, n_qubits: Int):
         self.n_qubits = n_qubits
         self.n_words = (self.n_qubits + bit_width - 1) // bit_width
-        self.x = BitTensor(n_qubits)
-        self.z = BitTensor(n_qubits)
+        self.x = BitVector(n_qubits)
+        self.z = BitVector(n_qubits)
 
     fn __str__(self) -> String:
         var s = String()
@@ -57,12 +57,10 @@ struct XZEncoding(
         self.x = other.x^
         self.z = other.z^
 
-    fn __setitem__(
-        self, idx: Int, val: Tuple[Bool, Bool]
-    ):
+    fn __setitem__(self, idx: Int, val: Tuple[Bool, Bool]):
         self.x[idx] = val[0]
         self.z[idx] = val[1]
-    
+
     fn __setitem__(
         self, idx: Int, val: Tuple[Scalar[int_type], Scalar[int_type]]
     ):
@@ -227,7 +225,7 @@ struct PauliString(
         var p = PauliString(
             "I" * input_xz.n_qubits, global_phase=global_phase.or_else(0)
         )
-        p.xz_encoding = input_xz # This will deep copy the BitTensor data
+        p.xz_encoding = input_xz  # This will deep copy the BitVector data
         p.pauli_string = String(p.xz_encoding)
         return p
 

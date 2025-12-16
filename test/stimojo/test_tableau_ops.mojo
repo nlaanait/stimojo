@@ -222,7 +222,7 @@ def test_call_operator_expanded():
 def test_call_and_apply_within_equivalence():
     print("== test_call_and_apply_within_equivalence")
     var t_n_qubits = 2  # Tableau size
-    var p_n_qubits = 3  # PauliString size
+    var _ = 3  # PauliString size
 
     # Case 1: Tableau size matches PauliString size, full conjugation
     var t_cx = Tableau(t_n_qubits)
@@ -247,7 +247,7 @@ def test_call_and_apply_within_equivalence():
 
     # Case 2: Tableau applied to a subsystem of a larger PauliString
     t_n_qubits = 1
-    p_n_qubits = 3
+    _ = 3
     var t_h = Tableau(t_n_qubits)
     t_h.apply_hadamard(0)  # H on 0
 
@@ -278,7 +278,7 @@ def test_call_and_apply_within_equivalence():
     var t_small = Tableau(1)
     try:
         var p_mismatched = PauliString("XX")
-        var res = t_small(p_mismatched)
+        _ = t_small(p_mismatched)
         assert_equal(True, False)  # Should not reach here
     except e:
         assert_equal(True, True)  # Expected error caught
