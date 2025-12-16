@@ -5,6 +5,10 @@ from collections.list import List
 from sys import simd_width_of
 from bit import pop_count
 
+from layout import Layout, LayoutTensor, RuntimeLayout, UNKNOWN_VALUE
+from utils import Index
+from .bit_tensor import BitTensor
+
 # compile-time parameters for XZEncoding bit-packing data layout
 alias int_type = DType.uint64
 alias bit_width = 64  # must match int_type
@@ -17,27 +21,20 @@ struct XZEncoding(
 ):
     var n_qubits: Int
     var n_words: Int
-    # int data type is specifed at compile-time
-    var x: UnsafePointer[Scalar[int_type], MutOrigin.external]
-    var z: UnsafePointer[Scalar[int_type], MutOrigin.external]
+    var x: BitTensor
+    var z: BitTensor
 
     fn __init__(out self, n_qubits: Int):
-        # allocate x,z ptr up to simd_width
         self.n_qubits = n_qubits
         self.n_words = (self.n_qubits + bit_width - 1) // bit_width
-        var alloc_size = align_up(self.n_words, simd_width)
-
-        self.x = alloc[Scalar[int_type]](alloc_size)
-        self.z = alloc[Scalar[int_type]](alloc_size)
-
-        # set x,z ptr to identity PauliString
-        memset(self.x, 0, alloc_size)
-        memset(self.z, 0, alloc_size)
+        self.x = BitTensor(n_qubits)
+        self.z = BitTensor(n_qubits)
 
     fn __str__(self) -> String:
         var s = String()
         for idx in range(self.n_qubits):
-            var x_bit, z_bit = self[idx]
+            var x_bit = self.x[idx]
+            var z_bit = self.z[idx]
             if not x_bit and not z_bit:
                 s += "I"
             elif x_bit and not z_bit:
@@ -51,70 +48,36 @@ struct XZEncoding(
     fn __copyinit__(out self, other: XZEncoding):
         self.n_qubits = other.n_qubits
         self.n_words = other.n_words
-        var alloc_size = align_up(self.n_words, simd_width)
-        self.x = alloc[Scalar[int_type]](alloc_size)
-        self.z = alloc[Scalar[int_type]](alloc_size)
-        memcpy(dest=self.x, src=other.x, count=alloc_size)
-        memcpy(dest=self.z, src=other.z, count=alloc_size)
+        self.x = other.x
+        self.z = other.z
 
     fn __moveinit__(out self, deinit other: XZEncoding):
         self.n_qubits = other.n_qubits
         self.n_words = other.n_words
-        self.x = other.x
-        self.z = other.z
+        self.x = other.x^
+        self.z = other.z^
 
-    fn __del__(deinit self):
-        if self.x:
-            self.x.destroy_pointee()
-            self.x.free()
-        if self.z:
-            self.z.destroy_pointee()
-            self.z.free()
-
+    fn __setitem__(
+        self, idx: Int, val: Tuple[Bool, Bool]
+    ):
+        self.x[idx] = val[0]
+        self.z[idx] = val[1]
+    
     fn __setitem__(
         self, idx: Int, val: Tuple[Scalar[int_type], Scalar[int_type]]
     ):
-        # find integer index (word_idx) and offset (bit_idx)
-        var word_idx = idx >> bit_exp
-        var bit_idx = idx & (bit_width - 1)
-        var mask = Scalar[int_type](1) << bit_idx
-
-        var current_word_x = self.x.load(word_idx)
-        if val[0] == 1:
-            current_word_x |= mask  # set bit
-        else:
-            current_word_x &= ~mask  # reset bit
-        self.x.store(word_idx, current_word_x)
-
-        # repeat for z ptr
-        var current_word_z = self.z.load(word_idx)
-        if val[1] == 1:
-            current_word_z |= mask
-        else:
-            current_word_z &= ~mask
-        self.z.store(word_idx, current_word_z)
+        self.x[idx] = val[0] == 1
+        self.z[idx] = val[1] == 1
 
     fn __getitem__(self, idx: Int) -> Tuple[Scalar[int_type], Scalar[int_type]]:
-        # find integer index (word_idx) and offset (bit_idx)
-        var word_idx = idx >> bit_exp
-        var bit_idx = idx & (bit_width - 1)
-
-        # return LSB
-        var x_val = (self.x[word_idx] >> bit_idx) & 1
-        var z_val = (self.z[word_idx] >> bit_idx) & 1
-
+        var x_val = Int(self.x[idx])
+        var z_val = Int(self.z[idx])
         return (x_val, z_val)
 
     fn __eq__(self, other: XZEncoding) -> Bool:
         if self.n_qubits != other.n_qubits:
             return False
-
-        for i in range(self.n_words):
-            if self.x[i] != other.x[i]:
-                return False
-            if self.z[i] != other.z[i]:
-                return False
-        return True
+        return self.x == other.x and self.z == other.z
 
     fn __ne__(self, other: XZEncoding) -> Bool:
         return not (self == other)
@@ -126,8 +89,8 @@ struct XZEncoding(
         SIMD[int_type, simd_width], SIMD[int_type, simd_width]
     ]:
         return (
-            self.x.load[width=simd_width](idx),
-            self.z.load[width=simd_width](idx),
+            self.x.load[simd_width](idx),
+            self.z.load[simd_width](idx),
         )
 
     @always_inline
@@ -138,8 +101,8 @@ struct XZEncoding(
         idx: Int,
         val: Tuple[SIMD[int_type, simd_width], SIMD[int_type, simd_width]],
     ):
-        self.x.store[width=simd_width](idx, val[0])
-        self.z.store[width=simd_width](idx, val[1])
+        self.x.store[simd_width](idx, val[0])
+        self.z.store[simd_width](idx, val[1])
 
 
 struct Phase(
@@ -256,17 +219,13 @@ struct PauliString(
 
     @staticmethod
     fn from_xz_encoding(
-        x: UnsafePointer[Scalar[int_type], MutOrigin.external],
-        z: UnsafePointer[Scalar[int_type], MutOrigin.external],
-        n_qubits: Int,
+        input_xz: XZEncoding,
         global_phase: Optional[Int],
     ) raises -> PauliString:
         var p = PauliString(
-            "I" * n_qubits, global_phase=global_phase.or_else(0)
+            "I" * input_xz.n_qubits, global_phase=global_phase.or_else(0)
         )
-        var num_words = (n_qubits + bit_width - 1) // bit_width
-        memcpy(dest=p.xz_encoding.x, src=x, count=num_words)
-        memcpy(dest=p.xz_encoding.z, src=z, count=num_words)
+        p.xz_encoding = input_xz # This will deep copy the BitTensor data
         p.pauli_string = String(p.xz_encoding)
         return p
 
