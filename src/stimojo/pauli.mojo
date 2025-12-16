@@ -70,8 +70,10 @@ struct XZEncoding(
         self.z[idx] = val[1] == 1
 
     fn __getitem__(self, idx: Int) -> Tuple[Scalar[int_type], Scalar[int_type]]:
-        var x_val = Int(self.x[idx])
-        var z_val = Int(self.z[idx])
+        var x_bool = self.x[idx]
+        var z_bool = self.z[idx]
+        var x_val = Scalar[int_type](x_bool)
+        var z_val = Scalar[int_type](z_bool)
         return (x_val, z_val)
 
     fn __eq__(self, other: XZEncoding) -> Bool:
