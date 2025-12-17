@@ -10,11 +10,12 @@ alias bit_width = 64
 alias bit_exp = 6
 alias simd_width = simd_width_of[int_type]()
 
+
 struct BitVector(
     Copyable, EqualityComparable, ImplicitlyCopyable, Movable, Stringable
 ):
     alias layout_type = Layout.row_major(UNKNOWN_VALUE)
-    
+
     var num_bits: Int
     var num_words: Int
     var _data: LayoutTensor[int_type, Self.layout_type, MutOrigin.external]
@@ -23,25 +24,33 @@ struct BitVector(
         self.num_bits = num_bits
         self.num_words = (num_bits + bit_width - 1) // bit_width
         var alloc_size = align_up(self.num_words, simd_width)
-        
+
         var ptr = alloc[Scalar[int_type]](alloc_size)
         memset(ptr, 0, alloc_size)
-        
-        var rt_layout = RuntimeLayout[Self.layout_type].row_major(Index(alloc_size))
-        self._data = LayoutTensor[int_type, Self.layout_type, MutOrigin.external](ptr, rt_layout)
+
+        var rt_layout = RuntimeLayout[Self.layout_type].row_major(
+            Index(alloc_size)
+        )
+        self._data = LayoutTensor[
+            int_type, Self.layout_type, MutOrigin.external
+        ](ptr, rt_layout)
 
     fn __copyinit__(out self, other: BitVector):
         self.num_bits = other.num_bits
         self.num_words = other.num_words
         var alloc_size = align_up(self.num_words, simd_width)
-        
+
         var ptr = alloc[Scalar[int_type]](alloc_size)
-        var rt_layout = RuntimeLayout[Self.layout_type].row_major(Index(alloc_size))
-        
+        var rt_layout = RuntimeLayout[Self.layout_type].row_major(
+            Index(alloc_size)
+        )
+
         # Copy data from other
         memcpy(dest=ptr, src=other._data.ptr, count=alloc_size)
-        
-        self._data = LayoutTensor[int_type, Self.layout_type, MutOrigin.external](ptr, rt_layout)
+
+        self._data = LayoutTensor[
+            int_type, Self.layout_type, MutOrigin.external
+        ](ptr, rt_layout)
 
     fn __moveinit__(out self, deinit other: BitVector):
         self.num_bits = other.num_bits
@@ -55,25 +64,25 @@ struct BitVector(
     fn __getitem__(self, idx: Int) -> Bool:
         var word_idx = idx >> bit_exp
         var bit_idx = idx & (bit_width - 1)
-        var word = self._data[word_idx]
+        var word = self._data.ptr.load(word_idx)
         return ((word >> bit_idx) & 1) == 1
 
     fn __setitem__(self, idx: Int, val: Bool):
         var word_idx = idx >> bit_exp
         var bit_idx = idx & (bit_width - 1)
         var mask = Scalar[int_type](1) << bit_idx
-        
-        var current_word = self._data[word_idx]
+
+        var current_word = self._data.ptr.load(word_idx)
         if val:
             current_word |= mask
         else:
             current_word &= ~mask
-        self._data[word_idx] = current_word
+        self._data.ptr.store(word_idx, current_word)
 
     fn __eq__(self, other: BitVector) -> Bool:
         if self.num_bits != other.num_bits:
             return False
-        
+
         # Compare words
         for i in range(self.num_words):
             if self._data[i] != other._data[i]:
@@ -109,42 +118,54 @@ struct BitVector(
 struct BitMatrix(
     Copyable, EqualityComparable, ImplicitlyCopyable, Movable, Stringable
 ):
+    # Column-Major packed layout
+    # Shape is (n_cols, n_words_per_col)
+    # n_words_per_col = ceil(n_rows / 64)
+    # Effectively transposing the storage to make column operations fast.
     alias layout_type = Layout.row_major(UNKNOWN_VALUE, UNKNOWN_VALUE)
-    
+
     var n_rows: Int
     var n_cols: Int
-    var n_words_per_row: Int
+    var n_words_per_col: Int
     var _data: LayoutTensor[int_type, Self.layout_type, MutOrigin.external]
 
     fn __init__(out self, rows: Int, cols: Int):
         self.n_rows = rows
         self.n_cols = cols
-        self.n_words_per_row = (cols + bit_width - 1) // bit_width
-        var alloc_size = rows * self.n_words_per_row
-        
+        self.n_words_per_col = (rows + bit_width - 1) // bit_width
+        var alloc_size = cols * self.n_words_per_col
+
         var ptr = alloc[Scalar[int_type]](alloc_size)
         memset(ptr, 0, alloc_size)
-        
-        var rt_layout = RuntimeLayout[Self.layout_type].row_major(Index(rows, self.n_words_per_row))
-        self._data = LayoutTensor[int_type, Self.layout_type, MutOrigin.external](ptr, rt_layout)
+
+        var rt_layout = RuntimeLayout[Self.layout_type].row_major(
+            Index(cols, self.n_words_per_col)
+        )
+        self._data = LayoutTensor[
+            int_type, Self.layout_type, MutOrigin.external
+        ](ptr, rt_layout)
 
     fn __copyinit__(out self, other: BitMatrix):
         self.n_rows = other.n_rows
         self.n_cols = other.n_cols
-        self.n_words_per_row = other.n_words_per_row
-        var alloc_size = self.n_rows * self.n_words_per_row
-        
+        self.n_words_per_col = other.n_words_per_col
+        var alloc_size = self.n_cols * self.n_words_per_col
+
         var ptr = alloc[Scalar[int_type]](alloc_size)
-        var rt_layout = RuntimeLayout[Self.layout_type].row_major(Index(self.n_rows, self.n_words_per_row))
-        
+        var rt_layout = RuntimeLayout[Self.layout_type].row_major(
+            Index(self.n_cols, self.n_words_per_col)
+        )
+
         memcpy(dest=ptr, src=other._data.ptr, count=alloc_size)
-        
-        self._data = LayoutTensor[int_type, Self.layout_type, MutOrigin.external](ptr, rt_layout)
+
+        self._data = LayoutTensor[
+            int_type, Self.layout_type, MutOrigin.external
+        ](ptr, rt_layout)
 
     fn __moveinit__(out self, deinit other: BitMatrix):
         self.n_rows = other.n_rows
         self.n_cols = other.n_cols
-        self.n_words_per_row = other.n_words_per_row
+        self.n_words_per_col = other.n_words_per_col
         self._data = other._data
 
     fn __del__(deinit self):
@@ -152,29 +173,31 @@ struct BitMatrix(
             self._data.ptr.free()
 
     fn __getitem__(self, r: Int, c: Int) -> Bool:
-        var w = c >> bit_exp
-        var b = c & (bit_width - 1)
-        var word = self._data[r, w][0]
+        # Data is packed along rows (words contain bits for multiple rows of a single column)
+        # _data[c, w]
+        var w = r >> bit_exp
+        var b = r & (bit_width - 1)
+        var word = self._data[c, w][0]
         return ((word >> b) & 1) == 1
 
     fn __setitem__(mut self, r: Int, c: Int, val: Bool):
-        var w = c >> bit_exp
-        var b = c & (bit_width - 1)
+        var w = r >> bit_exp
+        var b = r & (bit_width - 1)
         var mask = Scalar[int_type](1) << b
-        var word = self._data[r, w][0]
+        var word = self._data[c, w][0]
         if val:
             word |= mask
         else:
             word &= ~mask
-        self._data[r, w] = word
+        self._data[c, w] = word
 
     fn __eq__(self, other: BitMatrix) -> Bool:
         if self.n_rows != other.n_rows or self.n_cols != other.n_cols:
             return False
-        
-        for r in range(self.n_rows):
-            for w in range(self.n_words_per_row):
-                if self._data[r, w][0] != other._data[r, w][0]:
+
+        for c in range(self.n_cols):
+            for w in range(self.n_words_per_col):
+                if self._data[c, w][0] != other._data[c, w][0]:
                     return False
         return True
 
@@ -193,85 +216,112 @@ struct BitMatrix(
         return s
 
     fn is_zero(self) -> Bool:
-        var total_words = self.n_rows * self.n_words_per_row
+        var total_words = self.n_cols * self.n_words_per_col
         var ptr = self.unsafe_ptr()
         var has_non_zero = False
-        
+
         @parameter
         fn vec_check[width: Int](i: Int):
-            if has_non_zero: return
+            if has_non_zero:
+                return
             var v = ptr.load[width=width](i)
             if v.reduce_or() != 0:
                 has_non_zero = True
-        
+
         vectorize[vec_check, simd_width](total_words)
         return not has_non_zero
 
     fn is_identity(self) -> Bool:
         if self.n_rows != self.n_cols:
             return False
-            
-        var all_good = True
-        
-        for r in range(self.n_rows):
-            if not all_good: break
-            
-            var diag_w = r >> bit_exp
-            var diag_b = r & (bit_width - 1)
-            var expected_diag = Scalar[int_type](1) << diag_b
-            
-            @parameter
-            fn check_row[width: Int](w_start: Int):
-                if not all_good: return
-                var v = self._data.load[width](Index(r, w_start))
-                var expected = SIMD[int_type, width](0)
-                
-                # Check if diagonal word falls within this vector chunk
-                if w_start <= diag_w and diag_w < w_start + width:
-                    expected[diag_w - w_start] = expected_diag
-                
-                if (v ^ expected).reduce_or() != 0:
-                    all_good = False
 
-            vectorize[check_row, simd_width](self.n_words_per_row)
-            
+        var all_good = True
+
+        # Check diagonal
+        for c in range(self.n_cols):
+            if not all_good:
+                break
+
+            # We want M[r, r] == 1 for all r.
+            # In our layout, M[r, c] is bit r of column c.
+            # So for column c, we expect bit c to be 1, and all others 0.
+
+            var diag_w = c >> bit_exp
+            var diag_b = c & (bit_width - 1)
+            var expected_diag = Scalar[int_type](1) << diag_b
+
+            for w in range(self.n_words_per_col):
+                var val = self._data[c, w][0]
+                var expected = expected_diag if w == diag_w else 0
+                if val != expected:
+                    all_good = False
+                    break
+
         return all_good
 
     fn unsafe_ptr(self) -> UnsafePointer[Scalar[int_type], MutOrigin.external]:
         return self._data.ptr
-    
-    # 2D access to words
-    fn word(self, r: Int, w: Int) -> Scalar[int_type]:
-        return self._data[r, w][0]
-    
-    fn set_word(mut self, r: Int, w: Int, val: Scalar[int_type]):
-        self._data[r, w] = val
 
-    # Helper for row swap
+    # Access words of a column
+    fn col_word(self, c: Int, w: Int) -> Scalar[int_type]:
+        var idx = c * self.n_words_per_col + w
+        return self._data.ptr.load(idx)
+
+    fn set_col_word(mut self, c: Int, w: Int, val: Scalar[int_type]):
+        var idx = c * self.n_words_per_col + w
+        self._data.ptr.store(idx, val)
+
+    # Row operations are now slower as they iterate across columns
     fn swap_rows(mut self, r1: Int, r2: Int):
-        @parameter
-        fn vec_swap[width: Int](w: Int):
-            var v1 = self._data.load[width](Index(r1, w))
-            var v2 = self._data.load[width](Index(r2, w))
-            self._data.store[width](Index(r1, w), v2)
-            self._data.store[width](Index(r2, w), v1)
-        
-        vectorize[vec_swap, simd_width](self.n_words_per_row)
+        var w1 = r1 >> bit_exp
+        var b1 = r1 & (bit_width - 1)
+        var w2 = r2 >> bit_exp
+        var b2 = r2 & (bit_width - 1)
 
-    # Helper for row xor: target_row ^= source_row
+        var mask1 = Scalar[int_type](1) << b1
+        var mask2 = Scalar[int_type](1) << b2
+
+        for c in range(self.n_cols):
+            var word1 = self._data[c, w1][0]
+            var val1 = (word1 >> b1) & 1
+
+            var word2 = self._data[c, w2][0]
+            var val2 = (word2 >> b2) & 1
+
+            if val1 != val2:
+                # Toggle bits
+                if w1 == w2:
+                    # Same word
+                    var flip_mask = mask1 | mask2
+                    self._data[c, w1] = word1 ^ flip_mask
+                else:
+                    # Different words
+                    self._data[c, w1] = word1 ^ mask1
+                    self._data[c, w2] = word2 ^ mask2
+
+    # target_row ^= source_row
     fn xor_row(mut self, target_row: Int, source_row: Int):
-        @parameter
-        fn vec_xor[width: Int](w: Int):
-            var s = self._data.load[width](Index(source_row, w))
-            var t = self._data.load[width](Index(target_row, w))
-            self._data.store[width](Index(target_row, w), t ^ s)
-        
-        vectorize[vec_xor, simd_width](self.n_words_per_row)
-    
-    @always_inline
-    fn load[width: Int](self, row: Int, col: Int) -> SIMD[int_type, width]:
-        return self._data.load[width](Index(row, col))
+        var w_src = source_row >> bit_exp
+        var b_src = source_row & (bit_width - 1)
+        var w_tgt = target_row >> bit_exp
+        var b_tgt = target_row & (bit_width - 1)
+
+        var mask_tgt = Scalar[int_type](1) << b_tgt
+
+        for c in range(self.n_cols):
+            var val_src = (self._data[c, w_src][0] >> b_src) & 1
+
+            if val_src == 1:
+                self._data[c, w_tgt] ^= mask_tgt
 
     @always_inline
-    fn store[width: Int](self, row: Int, col:Int, val: SIMD[int_type, width]):
-        self._data.store[width](Index(row, col), val)
+    fn load_col[
+        width: Int
+    ](self, col: Int, w_idx: Int) -> SIMD[int_type, width]:
+        return self._data.load[width](Index(col, w_idx))
+
+    @always_inline
+    fn store_col[
+        width: Int
+    ](self, col: Int, w_idx: Int, val: SIMD[int_type, width]):
+        self._data.store[width](Index(col, w_idx), val)
