@@ -160,123 +160,186 @@ struct Tableau(Copyable, Movable):
             self._zs_zt[k, q] = x
 
     fn apply_X(mut self, q: Int):
+        # Apply X to qubit q:
+        # Signs ^= Z_column[q]
+        # With new layout, column q is contiguous and packed same as Signs.
         @always_inline
         @parameter
-        fn vec_body[width: Int](qubit: Int):
-            var _xs_zt = self._xs_zt.load[width=width](qubit, q)
-            var _zs_zt = self._zs_zt.load[width=width](qubit, q)
-            var _xs_signs = self._xs_signs.load[width=width](qubit)
-            var _zs_signs = self._zs_signs.load[width=width](qubit)
-            _xs_signs = _xs_zt.eq(1).select(~_xs_signs, _xs_signs)
-            _zs_signs = _zs_zt.eq(1).select(~_zs_signs, _zs_signs)
-            self._xs_signs.store[width=width](qubit, _xs_signs)
-            self._zs_signs.store[width=width](qubit, _zs_signs)
+        fn vec_body[width: Int](w_idx: Int):
+            # Load column words from ZT matrices
+            var v_xs_zt = self._xs_zt.load_col[width=width](q, w_idx)
+            var v_zs_zt = self._zs_zt.load_col[width=width](q, w_idx)
 
-        vectorize[vec_body, simd_width](self.n_qubits)
+            # Load signs words
+            var v_xs_signs = self._xs_signs.load[width=width](w_idx)
+            var v_zs_signs = self._zs_signs.load[width=width](w_idx)
+
+            # XOR
+            self._xs_signs.store[width=width](w_idx, v_xs_signs ^ v_xs_zt)
+            self._zs_signs.store[width=width](w_idx, v_zs_signs ^ v_zs_zt)
+
+        vectorize[vec_body, simd_width](self._xs_signs.num_words)
 
     fn apply_Y(mut self, q: Int):
+        # Apply Y to qubit q:
+        # Signs ^= X_column[q] ^ Z_column[q]
         @always_inline
         @parameter
-        fn vec_body[width: Int](qubit: Int):
-            var _xs_xt = self._xs_xt.load[width=width](qubit, q)
-            var _xs_zt = self._xs_zt.load[width=width](qubit, q)
-            var _zs_xt = self._zs_xt.load[width=width](qubit, q)
-            var _zs_zt = self._zs_zt.load[width=width](qubit, q)
-            var _xs_signs = self._xs_signs.load[width=width](qubit)
-            var _zs_signs = self._zs_signs.load[width=width](qubit)
-            _xs_signs = _xs_xt.eq(_xs_zt).select(_xs_signs, ~_xs_signs)
-            _zs_signs = _zs_xt.eq(_zs_zt).select(_zs_signs, ~_zs_signs)
-            self._xs_signs.store[width=width](qubit, _xs_signs)
-            self._zs_signs.store[width=width](qubit, _zs_signs)
+        fn vec_body[width: Int](w_idx: Int):
+            var v_xs_xt = self._xs_xt.load_col[width=width](q, w_idx)
+            var v_xs_zt = self._xs_zt.load_col[width=width](q, w_idx)
+            var v_zs_xt = self._zs_xt.load_col[width=width](q, w_idx)
+            var v_zs_zt = self._zs_zt.load_col[width=width](q, w_idx)
 
-        vectorize[vec_body, simd_width](self.n_qubits)
+            var v_xs_signs = self._xs_signs.load[width=width](w_idx)
+            var v_zs_signs = self._zs_signs.load[width=width](w_idx)
+
+            self._xs_signs.store[width=width](
+                w_idx, v_xs_signs ^ v_xs_xt ^ v_xs_zt
+            )
+            self._zs_signs.store[width=width](
+                w_idx, v_zs_signs ^ v_zs_xt ^ v_zs_zt
+            )
+
+        vectorize[vec_body, simd_width](self._xs_signs.num_words)
 
     fn apply_Z(mut self, q: Int):
-        for k in range(self.n_qubits):
-            if self._xs_xt[k, q]:
-                self._xs_signs[k] = not self._xs_signs[k]
-            if self._zs_xt[k, q]:
-                self._zs_signs[k] = not self._zs_signs[k]
+        # Apply Z to qubit q:
+        # Signs ^= X_column[q]
+        @always_inline
+        @parameter
+        fn vec_body[width: Int](w_idx: Int):
+            var v_xs_xt = self._xs_xt.load_col[width=width](q, w_idx)
+            var v_zs_xt = self._zs_xt.load_col[width=width](q, w_idx)
+
+            var v_xs_signs = self._xs_signs.load[width=width](w_idx)
+            var v_zs_signs = self._zs_signs.load[width=width](w_idx)
+
+            self._xs_signs.store[width=width](w_idx, v_xs_signs ^ v_xs_xt)
+            self._zs_signs.store[width=width](w_idx, v_zs_signs ^ v_zs_xt)
+
+        vectorize[vec_body, simd_width](self._xs_signs.num_words)
 
     fn apply_S(mut self, q: Int):
-        for k in range(self.n_qubits):
-            var x = self._xs_xt[k, q]
-            var z = self._xs_zt[k, q]
-            if x and z:
-                self._xs_signs[k] = not self._xs_signs[k]
-            self._xs_zt[k, q] = z != x
+        # S gate: Z -> Z, X -> Y = iXZ
+        # Update signs: Signs ^= X_col & Z_col
+        # Update ZT: ZT ^= XT
+        @always_inline
+        @parameter
+        fn vec_body[width: Int](w_idx: Int):
+            var v_xs_xt = self._xs_xt.load_col[width=width](q, w_idx)
+            var v_xs_zt = self._xs_zt.load_col[width=width](q, w_idx)
+            var v_zs_xt = self._zs_xt.load_col[width=width](q, w_idx)
+            var v_zs_zt = self._zs_zt.load_col[width=width](q, w_idx)
 
-            x = self._zs_xt[k, q]
-            z = self._zs_zt[k, q]
-            if x and z:
-                self._zs_signs[k] = not self._zs_signs[k]
-            self._zs_zt[k, q] = z != x
+            # Update signs if X=1 and Z=1
+            var flip_xs = v_xs_xt & v_xs_zt
+            var flip_zs = v_zs_xt & v_zs_zt
+
+            var v_xs_signs = self._xs_signs.load[width=width](w_idx)
+            var v_zs_signs = self._zs_signs.load[width=width](w_idx)
+            self._xs_signs.store[width=width](w_idx, v_xs_signs ^ flip_xs)
+            self._zs_signs.store[width=width](w_idx, v_zs_signs ^ flip_zs)
+
+            # ZT = ZT ^ XT
+            self._xs_zt.store_col[width=width](q, w_idx, v_xs_zt ^ v_xs_xt)
+            self._zs_zt.store_col[width=width](q, w_idx, v_zs_zt ^ v_zs_xt)
+
+        vectorize[vec_body, simd_width](self._xs_signs.num_words)
 
     fn apply_S_dag(mut self, q: Int):
-        for k in range(self.n_qubits):
-            var x = self._xs_xt[k, q]
-            var z = self._xs_zt[k, q]
-            if x and not z:
-                self._xs_signs[k] = not self._xs_signs[k]
-            self._xs_zt[k, q] = z != x
+        # S_dag gate: Z -> Z, X -> -Y = -iXZ
+        # Update signs: Signs ^= X_col & ~Z_col
+        # Update ZT: ZT ^= XT
+        @always_inline
+        @parameter
+        fn vec_body[width: Int](w_idx: Int):
+            var v_xs_xt = self._xs_xt.load_col[width=width](q, w_idx)
+            var v_xs_zt = self._xs_zt.load_col[width=width](q, w_idx)
+            var v_zs_xt = self._zs_xt.load_col[width=width](q, w_idx)
+            var v_zs_zt = self._zs_zt.load_col[width=width](q, w_idx)
 
-            x = self._zs_xt[k, q]
-            z = self._zs_zt[k, q]
-            if x and not z:
-                self._zs_signs[k] = not self._zs_signs[k]
-            self._zs_zt[k, q] = z != x
+            var flip_xs = v_xs_xt & (~v_xs_zt)
+            var flip_zs = v_zs_xt & (~v_zs_zt)
+
+            var v_xs_signs = self._xs_signs.load[width=width](w_idx)
+            var v_zs_signs = self._zs_signs.load[width=width](w_idx)
+            self._xs_signs.store[width=width](w_idx, v_xs_signs ^ flip_xs)
+            self._zs_signs.store[width=width](w_idx, v_zs_signs ^ flip_zs)
+
+            self._xs_zt.store_col[width=width](q, w_idx, v_xs_zt ^ v_xs_xt)
+            self._zs_zt.store_col[width=width](q, w_idx, v_zs_zt ^ v_zs_xt)
+
+        vectorize[vec_body, simd_width](self._xs_signs.num_words)
 
     fn apply_CX(mut self, c: Int, t: Int):
-        for k in range(self.n_qubits):
-            var x1 = self._xs_xt[k, c]
-            var z1 = self._xs_zt[k, c]
-            var x2 = self._xs_xt[k, t]
-            var z2 = self._xs_zt[k, t]
+        # CX: X_c -> X_c X_t, Z_t -> Z_c Z_t
+        # XT[t] ^= XT[c]
+        # ZT[c] ^= ZT[t]
+        # Signs update logic matches the scalar loop
+        @always_inline
+        @parameter
+        fn vec_body[width: Int](w_idx: Int):
+            # Load columns
+            var xc_xt = self._xs_xt.load_col[width=width](c, w_idx)
+            var zc_zt = self._xs_zt.load_col[width=width](c, w_idx)
+            var xt_xt = self._xs_xt.load_col[width=width](t, w_idx)
+            var zt_zt = self._xs_zt.load_col[width=width](t, w_idx)
 
-            var flip = x1 and z2 and not (x2 != z1)
-            if flip:
-                self._xs_signs[k] = not self._xs_signs[k]
+            # Calculate sign flips: x1 and z2 and not (x2 != z1)
+            # x1=xc_xt, z1=zc_zt, x2=xt_xt, z2=zt_zt
+            var flip_xs = xc_xt & zt_zt & (~(xt_xt ^ zc_zt))
+            var v_xs_signs = self._xs_signs.load[width=width](w_idx)
+            self._xs_signs.store[width=width](w_idx, v_xs_signs ^ flip_xs)
 
-            self._xs_xt[k, t] = self._xs_xt[k, t] != x1
-            self._xs_zt[k, c] = self._xs_zt[k, c] != z2
+            # Update columns
+            self._xs_xt.store_col[width=width](t, w_idx, xt_xt ^ xc_xt)
+            self._xs_zt.store_col[width=width](c, w_idx, zc_zt ^ zt_zt)
 
-            x1 = self._zs_xt[k, c]
-            z1 = self._zs_zt[k, c]
-            x2 = self._zs_xt[k, t]
-            z2 = self._zs_zt[k, t]
+            # Same for ZS part
+            var zc_xt = self._zs_xt.load_col[width=width](c, w_idx)
+            var zz_zt = self._zs_zt.load_col[width=width](c, w_idx)
+            var zt_xt = self._zs_xt.load_col[width=width](t, w_idx)
+            var zt_zt_z = self._zs_zt.load_col[width=width](t, w_idx)
 
-            flip = x1 and z2 and not (x2 != z1)
-            if flip:
-                self._zs_signs[k] = not self._zs_signs[k]
+            var flip_zs = zc_xt & zt_zt_z & (~(zt_xt ^ zz_zt))
+            var v_zs_signs = self._zs_signs.load[width=width](w_idx)
+            self._zs_signs.store[width=width](w_idx, v_zs_signs ^ flip_zs)
 
-            self._zs_xt[k, t] = self._zs_xt[k, t] != x1
-            self._zs_zt[k, c] = self._zs_zt[k, c] != z2
+            self._zs_xt.store_col[width=width](t, w_idx, zt_xt ^ zc_xt)
+            self._zs_zt.store_col[width=width](c, w_idx, zz_zt ^ zt_zt_z)
+
+        vectorize[vec_body, simd_width](self._xs_signs.num_words)
 
     fn apply_CZ(mut self, c: Int, t: Int):
-        for k in range(self.n_qubits):
-            var x1 = self._xs_xt[k, c]
-            var z1 = self._xs_zt[k, c]
-            var x2 = self._xs_xt[k, t]
-            var z2 = self._xs_zt[k, t]
+        @always_inline
+        @parameter
+        fn vec_body[width: Int](w_idx: Int):
+            var xc_xt = self._xs_xt.load_col[width=width](c, w_idx)
+            var zc_zt = self._xs_zt.load_col[width=width](c, w_idx)
+            var xt_xt = self._xs_xt.load_col[width=width](t, w_idx)
+            var zt_zt = self._xs_zt.load_col[width=width](t, w_idx)
 
-            var flip = x1 and x2 and (z1 != z2)
-            if flip:
-                self._xs_signs[k] = not self._xs_signs[k]
+            var flip_xs = xc_xt & xt_xt & (zc_zt ^ zt_zt)
+            var v_xs_signs = self._xs_signs.load[width=width](w_idx)
+            self._xs_signs.store[width=width](w_idx, v_xs_signs ^ flip_xs)
 
-            self._xs_zt[k, c] = self._xs_zt[k, c] != x2
-            self._xs_zt[k, t] = self._xs_zt[k, t] != x1
+            self._xs_zt.store_col[width=width](c, w_idx, zc_zt ^ xt_xt)
+            self._xs_zt.store_col[width=width](t, w_idx, zt_zt ^ xc_xt)
 
-            x1 = self._zs_xt[k, c]
-            z1 = self._zs_zt[k, c]
-            x2 = self._zs_xt[k, t]
-            z2 = self._zs_zt[k, t]
+            var zc_xt = self._zs_xt.load_col[width=width](c, w_idx)
+            var zz_zt = self._zs_zt.load_col[width=width](c, w_idx)
+            var zt_xt = self._zs_xt.load_col[width=width](t, w_idx)
+            var zt_zt_z = self._zs_zt.load_col[width=width](t, w_idx)
 
-            flip = x1 and x2 and (z1 != z2)
-            if flip:
-                self._zs_signs[k] = not self._zs_signs[k]
+            var flip_zs = zc_xt & zt_xt & (zz_zt ^ zt_zt_z)
+            var v_zs_signs = self._zs_signs.load[width=width](w_idx)
+            self._zs_signs.store[width=width](w_idx, v_zs_signs ^ flip_zs)
 
-            self._zs_zt[k, c] = self._zs_zt[k, c] != x2
-            self._zs_zt[k, t] = self._zs_zt[k, t] != x1
+            self._zs_zt.store_col[width=width](c, w_idx, zz_zt ^ zt_xt)
+            self._zs_zt.store_col[width=width](t, w_idx, zt_zt_z ^ zc_xt)
+
+        vectorize[vec_body, simd_width](self._xs_signs.num_words)
 
     fn apply_CY(mut self, c: Int, t: Int):
         self.apply_S_dag(t)
@@ -284,8 +347,33 @@ struct Tableau(Copyable, Movable):
         self.apply_S(t)
 
     fn prepend_SWAP(mut self, q1: Int, q2: Int):
-        self._swap_rows(0, q1, q2)
-        self._swap_rows(1, q1, q2)
+        # Efficient column swap
+        @always_inline
+        @parameter
+        fn vec_body[width: Int](w_idx: Int):
+            # XS
+            var v1_xt = self._xs_xt.load_col[width=width](q1, w_idx)
+            var v2_xt = self._xs_xt.load_col[width=width](q2, w_idx)
+            self._xs_xt.store_col[width=width](q1, w_idx, v2_xt)
+            self._xs_xt.store_col[width=width](q2, w_idx, v1_xt)
+
+            var v1_zt = self._xs_zt.load_col[width=width](q1, w_idx)
+            var v2_zt = self._xs_zt.load_col[width=width](q2, w_idx)
+            self._xs_zt.store_col[width=width](q1, w_idx, v2_zt)
+            self._xs_zt.store_col[width=width](q2, w_idx, v1_zt)
+
+            # ZS
+            var z1_xt = self._zs_xt.load_col[width=width](q1, w_idx)
+            var z2_xt = self._zs_xt.load_col[width=width](q2, w_idx)
+            self._zs_xt.store_col[width=width](q1, w_idx, z2_xt)
+            self._zs_xt.store_col[width=width](q2, w_idx, z1_xt)
+
+            var z1_zt = self._zs_zt.load_col[width=width](q1, w_idx)
+            var z2_zt = self._zs_zt.load_col[width=width](q2, w_idx)
+            self._zs_zt.store_col[width=width](q1, w_idx, z2_zt)
+            self._zs_zt.store_col[width=width](q2, w_idx, z1_zt)
+
+        vectorize[vec_body, simd_width](self._xs_signs.num_words)
 
     fn prepend_X(mut self, q: Int):
         self._zs_signs[q] = not self._zs_signs[q]
@@ -298,18 +386,23 @@ struct Tableau(Copyable, Movable):
         self._xs_signs[q] = not self._xs_signs[q]
 
     fn _swap_x_z_for_qubit(mut self, q: Int):
-        var num_words = self._xs_xt.n_words_per_row
+        # Column swap between XT and ZT for qubit q
+        @always_inline
+        @parameter
+        fn vec_body[width: Int](w_idx: Int):
+            # XS
+            var xt = self._xs_xt.load_col[width=width](q, w_idx)
+            var zt = self._xs_zt.load_col[width=width](q, w_idx)
+            self._xs_xt.store_col[width=width](q, w_idx, zt)
+            self._xs_zt.store_col[width=width](q, w_idx, xt)
 
-        for w in range(num_words):
-            var v_xs_xt = self._xs_xt.word(q, w)
-            var v_zs_xt = self._zs_xt.word(q, w)
-            self._xs_xt.set_word(q, w, v_zs_xt)
-            self._zs_xt.set_word(q, w, v_xs_xt)
+            # ZS
+            var z_xt = self._zs_xt.load_col[width=width](q, w_idx)
+            var z_zt = self._zs_zt.load_col[width=width](q, w_idx)
+            self._zs_xt.store_col[width=width](q, w_idx, z_zt)
+            self._zs_zt.store_col[width=width](q, w_idx, z_xt)
 
-            var v_xs_zt = self._xs_zt.word(q, w)
-            var v_zs_zt = self._zs_zt.word(q, w)
-            self._xs_zt.set_word(q, w, v_zs_zt)
-            self._zs_zt.set_word(q, w, v_xs_zt)
+        vectorize[vec_body, simd_width](self._xs_signs.num_words)
 
         var s = self._xs_signs[q]
         self._xs_signs[q] = self._zs_signs[q]
@@ -347,32 +440,56 @@ struct Tableau(Copyable, Movable):
         source_half: Int,
         source_row: Int,
     ):
+        # NOTE: This is slow with column-major storage
         if target_half == 0:
             if source_half == 0:
                 self._xs_xt.xor_row(target_row, source_row)
                 self._xs_zt.xor_row(target_row, source_row)
-            else:  
-                var num_words = self._xs_xt.n_words_per_row
-                for w in range(num_words):
-                    var s_xt = self._zs_xt.word(source_row, w)
-                    var t_xt = self._xs_xt.word(target_row, w)
-                    self._xs_xt.set_word(target_row, w, t_xt ^ s_xt)
+            else:
+                # Optimized manually
+                var w_src = source_row >> 6
+                var b_src = source_row & 63
+                var w_tgt = target_row >> 6
+                var b_tgt = target_row & 63
+                var mask_tgt = Scalar[int_type](1) << b_tgt
 
-                    var s_zt = self._zs_zt.word(source_row, w)
-                    var t_zt = self._xs_zt.word(target_row, w)
-                    self._xs_zt.set_word(target_row, w, t_zt ^ s_zt)
-        else:  
+                for c in range(self.n_qubits):
+                    var zs_xt_bit = (
+                        self._zs_xt.col_word(c, w_src) >> b_src
+                    ) & 1
+                    if zs_xt_bit == 1:
+                        var val = self._xs_xt.col_word(c, w_tgt)
+                        self._xs_xt.set_col_word(c, w_tgt, val ^ mask_tgt)
+
+                    var zs_zt_bit = (
+                        self._zs_zt.col_word(c, w_src) >> b_src
+                    ) & 1
+                    if zs_zt_bit == 1:
+                        var val = self._xs_zt.col_word(c, w_tgt)
+                        self._xs_zt.set_col_word(c, w_tgt, val ^ mask_tgt)
+        else:
             if source_half == 0:
-                var num_words = self._xs_xt.n_words_per_row
-                for w in range(num_words):
-                    var s_xt = self._xs_xt.word(source_row, w)
-                    var t_xt = self._zs_xt.word(target_row, w)
-                    self._zs_xt.set_word(target_row, w, t_xt ^ s_xt)
+                var w_src = source_row >> 6
+                var b_src = source_row & 63
+                var w_tgt = target_row >> 6
+                var b_tgt = target_row & 63
+                var mask_tgt = Scalar[int_type](1) << b_tgt
 
-                    var s_zt = self._xs_zt.word(source_row, w)
-                    var t_zt = self._zs_zt.word(target_row, w)
-                    self._zs_zt.set_word(target_row, w, t_zt ^ s_zt)
-            else:  
+                for c in range(self.n_qubits):
+                    var xs_xt_bit = (
+                        self._xs_xt.col_word(c, w_src) >> b_src
+                    ) & 1
+                    if xs_xt_bit == 1:
+                        var val = self._zs_xt.col_word(c, w_tgt)
+                        self._zs_xt.set_col_word(c, w_tgt, val ^ mask_tgt)
+
+                    var xs_zt_bit = (
+                        self._xs_zt.col_word(c, w_src) >> b_src
+                    ) & 1
+                    if xs_zt_bit == 1:
+                        var val = self._zs_zt.col_word(c, w_tgt)
+                        self._zs_zt.set_col_word(c, w_tgt, val ^ mask_tgt)
+            else:
                 self._zs_xt.xor_row(target_row, source_row)
                 self._zs_zt.xor_row(target_row, source_row)
 
@@ -381,11 +498,15 @@ struct Tableau(Copyable, Movable):
         self._xor_pauli_rows(0, control, 0, target)
 
     fn prepend_H_YZ(mut self, q: Int):
-        var num_words = self._zs_zt.n_words_per_row
-        for w in range(num_words):
-            var v_z = self._zs_zt.word(q, w)
-            var v_x = self._zs_xt.word(q, w)
-            self._zs_zt.set_word(q, w, v_z ^ v_x)
+        # ZT[q] ^= XT[q]
+        @always_inline
+        @parameter
+        fn vec_body[width: Int](w_idx: Int):
+            var v_z = self._zs_zt.load_col[width=width](q, w_idx)
+            var v_x = self._zs_xt.load_col[width=width](q, w_idx)
+            self._zs_zt.store_col[width=width](q, w_idx, v_z ^ v_x)
+
+        vectorize[vec_body, simd_width](self._xs_signs.num_words)
 
         self._zs_signs[q] = not self._zs_signs[q]
         self.prepend_Z(q)
@@ -402,59 +523,107 @@ struct Tableau(Copyable, Movable):
     fn _row_to_pauli(self, half: Int, row: Int) raises -> PauliString:
         var p = PauliString("I" * self.n_qubits)
 
-        var xt_ptr = (
-            self._xs_xt.unsafe_ptr() if half == 0 else self._zs_xt.unsafe_ptr()
-        )
-        var zt_ptr = (
-            self._xs_zt.unsafe_ptr() if half == 0 else self._zs_zt.unsafe_ptr()
-        )
-        var signs_ptr = (
-            self._xs_signs.unsafe_ptr() if half
-            == 0 else self._zs_signs.unsafe_ptr()
-        )
-
+        # Reconstructing a PauliString from a scattered row
+        var row_w = row >> 6
+        var row_b = row & 63
         var words = p.xz_encoding.x.num_words
-        var row_stride = self._xs_xt.n_words_per_row
 
-        for w in range(words):
-            var idx = row * row_stride + w
-            p.xz_encoding.x.store[1](w, xt_ptr[idx])
-            p.xz_encoding.z.store[1](w, zt_ptr[idx])
+        if half == 0:
+            for w in range(words):
+                var packed_x: UInt64 = 0
+                var packed_z: UInt64 = 0
 
-        var bit = (signs_ptr[row >> 6] >> (row & 63)) & 1
-        p.global_phase = Phase(2) if bit == 1 else Phase(0)
+                for i in range(64):
+                    var q = w * 64 + i
+                    if q < self.n_qubits:
+                        var x_bit = (
+                            self._xs_xt.col_word(q, row_w) >> row_b
+                        ) & 1
+                        var z_bit = (
+                            self._xs_zt.col_word(q, row_w) >> row_b
+                        ) & 1
+
+                        packed_x |= x_bit << i
+                        packed_z |= z_bit << i
+
+                p.xz_encoding.x._data[w] = packed_x
+                p.xz_encoding.z._data[w] = packed_z
+        else:
+            for w in range(words):
+                var packed_x: UInt64 = 0
+                var packed_z: UInt64 = 0
+
+                for i in range(64):
+                    var q = w * 64 + i
+                    if q < self.n_qubits:
+                        var x_bit = (
+                            self._zs_xt.col_word(q, row_w) >> row_b
+                        ) & 1
+                        var z_bit = (
+                            self._zs_zt.col_word(q, row_w) >> row_b
+                        ) & 1
+
+                        packed_x |= x_bit << i
+                        packed_z |= z_bit << i
+
+                p.xz_encoding.x._data[w] = packed_x
+                p.xz_encoding.z._data[w] = packed_z
+
+        var sign: Bool
+        if half == 0:
+            sign = self._xs_signs[row]
+        else:
+            sign = self._zs_signs[row]
+        p.global_phase = Phase(2) if sign else Phase(0)
         p.pauli_string = String(p.xz_encoding)
         return p^
 
     fn _pauli_to_row(mut self, p: PauliString, half: Int, row: Int) raises:
-        var xt_ptr = (
-            self._xs_xt.unsafe_ptr() if half == 0 else self._zs_xt.unsafe_ptr()
-        )
-        var zt_ptr = (
-            self._xs_zt.unsafe_ptr() if half == 0 else self._zs_zt.unsafe_ptr()
-        )
-        var signs_ptr = (
-            self._xs_signs.unsafe_ptr() if half
-            == 0 else self._zs_signs.unsafe_ptr()
-        )
+        var row_w = row >> 6
+        var row_b = row & 63
+        var mask = Scalar[int_type](1) << row_b
 
-        var words = p.xz_encoding.x.num_words
-        var row_stride = self._xs_xt.n_words_per_row
+        if half == 0:
+            for q in range(self.n_qubits):
+                var x_val = p.xz_encoding.x[q]
+                var z_val = p.xz_encoding.z[q]
 
-        for w in range(words):
-            var idx = row * row_stride + w
-            xt_ptr.store(idx, p.xz_encoding.x.load[1](w))
-            zt_ptr.store(idx, p.xz_encoding.z.load[1](w))
+                var x_word = self._xs_xt.col_word(q, row_w)
+                if x_val:
+                    x_word |= mask
+                else:
+                    x_word &= ~mask
+                self._xs_xt.set_col_word(q, row_w, x_word)
 
-        var word_idx = row >> 6
-        var bit_idx = row & 63
-        var mask = Scalar[DType.uint64](1) << bit_idx
-        var val = signs_ptr[word_idx]
-        if p.global_phase == Phase(2):
-            val |= mask
+                var z_word = self._xs_zt.col_word(q, row_w)
+                if z_val:
+                    z_word |= mask
+                else:
+                    z_word &= ~mask
+                self._xs_zt.set_col_word(q, row_w, z_word)
         else:
-            val &= ~mask
-        signs_ptr.store(word_idx, val)
+            for q in range(self.n_qubits):
+                var x_val = p.xz_encoding.x[q]
+                var z_val = p.xz_encoding.z[q]
+
+                var x_word = self._zs_xt.col_word(q, row_w)
+                if x_val:
+                    x_word |= mask
+                else:
+                    x_word &= ~mask
+                self._zs_xt.set_col_word(q, row_w, x_word)
+
+                var z_word = self._zs_zt.col_word(q, row_w)
+                if z_val:
+                    z_word |= mask
+                else:
+                    z_word &= ~mask
+                self._zs_zt.set_col_word(q, row_w, z_word)
+
+        if half == 0:
+            self._xs_signs[row] = p.global_phase == Phase(2)
+        else:
+            self._zs_signs[row] = p.global_phase == Phase(2)
 
     fn _mul_rows(
         mut self,
@@ -463,6 +632,7 @@ struct Tableau(Copyable, Movable):
         source_half: Int,
         source_row: Int,
     ) raises:
+        # Optimized _mul_rows could potentially avoid full reconstruction if implemented natively
         var p1 = self._row_to_pauli(target_half, target_row)
         var p2 = self._row_to_pauli(source_half, source_row)
         p1.prod(p2)
@@ -470,6 +640,15 @@ struct Tableau(Copyable, Movable):
         self._pauli_to_row(p1, target_half, target_row)
 
     fn prepend_H_XY(mut self, q: Int) raises:
+        # H_XY is tricky, it involves if conditions on X and Z.
+        # But for symplectic update:
+        # X -> Y, Z -> -Z
+        # X -> XZ, Z -> Z (with phase flip if X=1)
+        # Wait, H_XY = (X+Z)/sqrt(2)? No, that's H.
+        # This implementation was bit-wise.
+        # "if x and not z: z=1", etc.
+        # This is hard to vectorize across rows if bits depend on each other non-linearly.
+        # But we can just iterate.
         for k in range(self.n_qubits):
             var x = self._xs_xt[k, q]
             var z = self._xs_zt[k, q]
