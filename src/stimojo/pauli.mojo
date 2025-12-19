@@ -7,30 +7,23 @@ from bit import pop_count
 
 from layout import Layout, LayoutTensor, RuntimeLayout, UNKNOWN_VALUE
 from utils import Index
-from .bit_tensor import BitVector
-
-# compile-time parameters for XZEncoding bit-packing data layout
-comptime int_type = DType.uint64
-comptime bit_width = 64  # must match int_type
-comptime bit_exp = 6  # must be equal to log2(bit_width)
-comptime simd_width = simd_width_of[int_type]()
+from .bit_tensor import BitVector, int_type, simd_width, int_bit_width
 
 
 struct XZEncoding(
     Copyable, EqualityComparable, ImplicitlyCopyable, Movable, Stringable
 ):
     var n_qubits: Int
-    var n_words: Int
     var x: BitVector
     var z: BitVector
 
     fn __init__(out self, n_qubits: Int):
         self.n_qubits = n_qubits
-        self.n_words = (self.n_qubits + bit_width - 1) // bit_width
         self.x = BitVector(n_qubits)
         self.z = BitVector(n_qubits)
 
     fn __str__(self) -> String:
+        """Pauli String Representation."""
         var s = String()
         for idx in range(self.n_qubits):
             var x_bit = self.x[idx]
@@ -47,13 +40,11 @@ struct XZEncoding(
 
     fn __copyinit__(out self, other: XZEncoding):
         self.n_qubits = other.n_qubits
-        self.n_words = other.n_words
         self.x = other.x
         self.z = other.z
 
     fn __moveinit__(out self, deinit other: XZEncoding):
         self.n_qubits = other.n_qubits
-        self.n_words = other.n_words
         self.x = other.x^
         self.z = other.z^
 
@@ -166,7 +157,8 @@ struct PauliString(
         self.n_qubits = len(pauli_string)
         self.xz_encoding = XZEncoding(n_qubits=self.n_qubits)
         self.global_phase = Phase(global_phase)
-        # store pauli string then xz_encoding
+
+        # store pauli string then xz_encoded it
         self.pauli_string = pauli_string.upper()
         self.xz_encode()
 
@@ -226,10 +218,11 @@ struct PauliString(
             "I" * input_xz.n_qubits, global_phase=global_phase.or_else(0)
         )
         p.xz_encoding = input_xz  # This will deep copy the BitVector data
-        p.pauli_string = String(p.xz_encoding)
+        p.pauli_string = String()  # leave empty to avoid stringify cost
         return p
 
     fn __str__(self) -> String:
+        """Pauli String representation with phase prefix: (0:+,1:i,2:-,3:-i)."""
         return String(self.global_phase) + String(self.xz_encoding)
 
     @staticmethod
@@ -247,6 +240,8 @@ struct PauliString(
         SIMD[int_type, simd_width],
         SIMD[int_type, simd_width],
     ]:
+        """Computes XOR of XZEncoding across 1 SIMD lane while tracking phase.
+        """
         var x_result = x ^ other_x
         var z_result = z ^ other_z
 
@@ -257,16 +252,21 @@ struct PauliString(
         return x_result, z_result
 
     fn __mul__(self, other: PauliString) raises -> PauliString:
-        var res = self
-        res.prod(other)
+        """Out-of-Place product of 2 PauliStrings."""
+        var res = self  # deep copy
+        res.prod(other)  # invokes in-place prod on copy
         return res
 
     fn prod(mut self, other: PauliString) raises:
+        """In-Place product of 2 PauliStrings."""
+
+        # allocate ptr with 2 * simd_width to store accumulated phase factors
         var accum_ptr = alloc[UInt64](2 * simd_width)
         memset(accum_ptr, 0, 2 * simd_width)
 
+        # function to compute Pauli products across a simd lane
         @parameter
-        fn vec_body[width: Int](idx: Int):
+        fn prod[width: Int](idx: Int):
             var c1 = accum_ptr.load[width=width](0)
             var c2 = accum_ptr.load[width=width](simd_width)
             var x, z = self.xz_encoding.load[width](idx)
@@ -281,8 +281,10 @@ struct PauliString(
             accum_ptr.store[width=width](0, c1)
             accum_ptr.store[width=width](simd_width, c2)
 
-        vectorize[vec_body, simd_width](self.xz_encoding.n_words)
+        # map prod across n_words of BitVector
+        vectorize[prod, simd_width](self.xz_encoding.x.n_words)
 
+        # reduce to find the accumulated phase
         var c1_simd = accum_ptr.load[width=simd_width](0)
         var c2_simd = accum_ptr.load[width=simd_width](simd_width)
         var total_c1 = 0
@@ -292,7 +294,10 @@ struct PauliString(
             total_c2 += Int(pop_count(c2_simd[i]))
 
         var phase_change = total_c1 + 2 * total_c2
+
+        # update the phase (recall: log base-i)
         self.global_phase += other.global_phase + phase_change
 
+        # free up accumulated phase ptr
         accum_ptr.destroy_pointee()
         accum_ptr.free()
