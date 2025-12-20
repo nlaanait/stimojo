@@ -4,14 +4,14 @@ from time import time_function
 
 
 fn main() raises:
-    var pauli_terms = Int(1e9)
+    var pauli_terms = Int(5e9)
     var random_encoding_1 = XZEncoding.random_encoding(n_qubits=pauli_terms)
     var random_encoding_2 = XZEncoding.random_encoding(n_qubits=pauli_terms)
     var p1 = PauliString.from_xz_encoding(random_encoding_1)
     var p2 = PauliString.from_xz_encoding(random_encoding_2)
 
     print(
-        "IN-PLACE products of Pauli strings with length={}".format(pauli_terms)
+        "IN-PLACE products of Pauli strings with length={} Billion".format(pauli_terms/1e9)
     )
 
     @parameter

@@ -4,7 +4,7 @@ from algorithm import vectorize
 from collections.list import List
 from sys import simd_width_of
 from bit import pop_count
-from random import randint
+from random import randint, seed
 
 from layout import Layout, LayoutTensor, RuntimeLayout, UNKNOWN_VALUE
 from utils import Index
@@ -41,9 +41,14 @@ struct XZEncoding(
 
     @staticmethod
     fn random_encoding(n_qubits: Int) -> XZEncoding:
+        seed()
         encoding = XZEncoding(n_qubits)
-        randint[int_type](encoding.x.unsafe_ptr(), encoding.x.n_words, 0, 1)
-        randint[int_type](encoding.z.unsafe_ptr(), encoding.x.n_words, 0, 1)
+        randint[int_type](
+            encoding.x.unsafe_ptr(), encoding.x.n_words, int_bit_width, 2**int_bit_width
+        )
+        randint[int_type](
+            encoding.z.unsafe_ptr(), encoding.x.n_words, int_bit_width, 2**int_bit_width
+        )
         return encoding
 
     fn __copyinit__(out self, other: XZEncoding):
