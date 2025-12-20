@@ -1,30 +1,33 @@
-from stimojo.pauli import PauliString
+from stimojo.pauli import PauliString, XZEncoding
 import benchmark
+from time import time_function
 
 
 fn main() raises:
-    var repeats = 1e6
-    var pauli_string_1 = "IXYZ" * Int(repeats)
-    var pauli_string_2 = "YZIX" * Int(repeats)
-    var p1 = PauliString(pauli_string_1)
-    var p2 = PauliString(pauli_string_2)
+    var pauli_terms = Int(1e9)
+    var random_encoding_1 = XZEncoding.random_encoding(n_qubits=pauli_terms)
+    var random_encoding_2 = XZEncoding.random_encoding(n_qubits=pauli_terms)
+    var p1 = PauliString.from_xz_encoding(random_encoding_1)
+    var p2 = PauliString.from_xz_encoding(random_encoding_2)
 
     print(
-        "IN-PLACE products of Pauli strings with length={}".format(
-            len(pauli_string_1)
-        )
+        "IN-PLACE products of Pauli strings with length={}".format(pauli_terms)
     )
 
     @parameter
     fn bench_inplace() raises:
         p1.prod(p2)
 
+    print(
+        "Smoke test for 1 iteration:", time_function[bench_inplace]() / 1e9, "s"
+    )
+
     report = benchmark.run[bench_inplace](max_runtime_secs=5)
     report.print(unit=benchmark.Unit.s)
 
     print(
         "OUT-OF-PLACE products of Pauli strings with length={}".format(
-            len(pauli_string_1)
+            pauli_terms
         )
     )
 

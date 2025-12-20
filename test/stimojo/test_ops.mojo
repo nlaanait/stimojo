@@ -35,9 +35,9 @@ fn test_commutes_sanity() raises:
     print("== test_commutes_sanity")
     # Test basic commutativity
     # Note: Current implementation might be stubbed
-    assert_true(commutes(PauliString("X"), PauliString("X")))
-    assert_true(commutes(PauliString("Z"), PauliString("Z")))
-    assert_true(commutes(PauliString("I"), PauliString("X")))
+    assert_true(commutes(PauliString(1, "X"), PauliString(1, "X")))
+    assert_true(commutes(PauliString(1, "Z"), PauliString(1, "Z")))
+    assert_true(commutes(PauliString(1, "I"), PauliString(1, "X")))
 
 
 fn main() raises:

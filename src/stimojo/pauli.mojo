@@ -4,6 +4,7 @@ from algorithm import vectorize
 from collections.list import List
 from sys import simd_width_of
 from bit import pop_count
+from random import randint
 
 from layout import Layout, LayoutTensor, RuntimeLayout, UNKNOWN_VALUE
 from utils import Index
@@ -37,6 +38,13 @@ struct XZEncoding(
             elif x_bit and z_bit:
                 s += "Y"
         return s
+
+    @staticmethod
+    fn random_encoding(n_qubits: Int) -> XZEncoding:
+        encoding = XZEncoding(n_qubits)
+        randint[int_type](encoding.x.unsafe_ptr(), encoding.x.n_words, 0, 1)
+        randint[int_type](encoding.z.unsafe_ptr(), encoding.x.n_words, 0, 1)
+        return encoding
 
     fn __copyinit__(out self, other: XZEncoding):
         self.n_qubits = other.n_qubits
@@ -153,14 +161,21 @@ struct PauliString(
     var n_qubits: Int
     var global_phase: Phase
 
-    fn __init__(out self, pauli_string: String, global_phase: Int = 0) raises:
-        self.n_qubits = len(pauli_string)
+    fn __init__(
+        out self,
+        n_qubits: Int,
+        pauli_string: Optional[String] = None,
+        global_phase: Int = 0,
+    ) raises:
+        self.n_qubits = n_qubits
         self.xz_encoding = XZEncoding(n_qubits=self.n_qubits)
         self.global_phase = Phase(global_phase)
 
         # store pauli string then xz_encoded it
-        self.pauli_string = pauli_string.upper()
-        self.xz_encode()
+        self.pauli_string = pauli_string.or_else("")
+        if self.pauli_string != "":
+            self.pauli_string = self.pauli_string.upper()
+            self.xz_encode()
 
     fn __copyinit__(out self, other: PauliString):
         self.pauli_string = other.pauli_string
@@ -212,13 +227,14 @@ struct PauliString(
     @staticmethod
     fn from_xz_encoding(
         input_xz: XZEncoding,
-        global_phase: Optional[Int],
+        global_phase: Optional[Int] = None,
     ) raises -> PauliString:
         var p = PauliString(
-            "I" * input_xz.n_qubits, global_phase=global_phase.or_else(0)
+            input_xz.n_qubits,
+            pauli_string="",
+            global_phase=global_phase.or_else(0),
         )
         p.xz_encoding = input_xz  # This will deep copy the BitVector data
-        p.pauli_string = String()  # leave empty to avoid stringify cost
         return p
 
     fn __str__(self) -> String:

@@ -12,7 +12,7 @@ alias simd_width = simd_width_of[DType.uint8]()
 def test_from_string_roundtrip():
     print("== test_from_string_roundtrip")
     var s = "IxYz"
-    var enc = PauliString(s)
+    var enc = PauliString(len(s), s)
     # PauliString.__str__ should produce the uppercase canonical pauli string with phase prefix
     assert_equal(String(enc), "+IXYZ")
 
@@ -23,8 +23,8 @@ def test_mul_produces_expected():
     var pauli_string_1 = "IXYZ" * repeats
     var pauli_string_2 = "YZIX" * repeats
 
-    var p1 = PauliString(pauli_string_1)
-    var p2 = PauliString(pauli_string_2)
+    var p1 = PauliString(len(pauli_string_1), pauli_string_1)
+    var p2 = PauliString(len(pauli_string_2), pauli_string_2)
 
     var prod = p1 * p2
     # for these inputs each position should XOR to 'Y' with '+' phase
@@ -39,17 +39,17 @@ def test_simd_boundary():
     print("== test_simd_boundary")
     # Test strings with lengths around SIMD boundaries
     var short_string = "I"  # single char
-    var enc_short = PauliString(short_string)
+    var enc_short = PauliString(len(short_string), short_string)
     assert_equal(String(enc_short), "+I")
 
     # 15 chars (likely less than typical SIMD width)
     var sub_simd = "IXYZIXYZIXYZIXY"
-    var enc_sub = PauliString(sub_simd)
+    var enc_sub = PauliString(len(sub_simd), sub_simd)
     assert_equal(String(enc_sub), "+" + sub_simd)
 
     # 33 chars (likely more than typical SIMD width)
     var over_simd = "IXYZIXYZIXYZIXYZIXYZIXYZIXYZIXYZI"
-    var enc_over = PauliString(over_simd)
+    var enc_over = PauliString(len(over_simd), over_simd)
     assert_equal(String(enc_over), "+" + over_simd)
 
 
@@ -59,16 +59,16 @@ def test_simd_mul_lengths():
     var len_15 = "IXYZIXYZIXYZIXY"  # 15 chars
     var len_33 = "IXYZIXYZIXYZIXYZIXYZIXYZIXYZIXYZI"  # 33 chars
 
-    var p1 = PauliString(len_15)
-    var p2 = PauliString(len_15)
+    var p1 = PauliString(len(len_15), len_15)
+    var p2 = PauliString(len(len_15), len_15)
     var prod = p1 * p2
     # Each position XORs with itself, should give all I's, phase '+'
     assert_equal(String(prod), "+" + "I" * 15)
     assert_equal(prod.global_phase.log_value, 0)
 
     # Now try longer strings that need multiple SIMD ops
-    var p3 = PauliString(len_33)
-    var p4 = PauliString(len_33)
+    var p3 = PauliString(len(len_33), len_33)
+    var p4 = PauliString(len(len_33), len_33)
     var long_prod = p3 * p4
     assert_equal(String(long_prod), "+" + "I" * 33)
     assert_equal(long_prod.global_phase.log_value, 0)
@@ -79,7 +79,7 @@ def test_invalid_chars():
     # Test error handling for invalid Pauli characters
     try:
         var s = "ABC"
-        var _ = PauliString(s)
+        var _ = PauliString(len(s), s)
         assert_equal(True, False)
     except e:
         assert_equal(True, True)
@@ -88,8 +88,8 @@ def test_invalid_chars():
 def test_mixed_case_mul():
     print("== test_mixed_case_mul")
     # Test that case-insensitive parsing works correctly in multiplication
-    var p1 = PauliString("iXyZ")
-    var p2 = PauliString("YzIx")
+    var p1 = PauliString(4, "iXyZ")
+    var p2 = PauliString(4, "YzIx")
     var prod = p1 * p2
     assert_equal(
         String(prod), "+YYYY"
@@ -103,14 +103,14 @@ def test_product_vs_mul():
     var inputs = ["IXYZ", "YZIX", "IIXX", "ZZZZ"]
 
     for i in range(len(inputs)):
-        var p1 = PauliString(inputs[i])
+        var p1 = PauliString(len(inputs[i]), String(inputs[i]))
         for j in range(len(inputs)):
-            var p2 = PauliString(inputs[j])
+            var p2 = PauliString(len(inputs[j]), String(inputs[j]))
             # Get result via __mul__
             var mul_result = p1 * p2
             # Get result via product
             var p1_copy = PauliString(
-                inputs[i]
+                len(inputs[i]), String(inputs[i])
             )  # fresh copy since product modifies in-place
             p1_copy.prod(p2)
             assert_equal(String(p1_copy), String(mul_result))
@@ -134,12 +134,12 @@ def test_product_simd_alignment():
         # Create strings of the specified length
         var s1 = "X" * length
         var s2 = "Z" * length
-        var p1 = PauliString(s1)
-        var p2 = PauliString(s2)
+        var p1 = PauliString(length, s1)
+        var p2 = PauliString(length, s2)
 
         # Both operations should give "Y"s (X*Z = Y, so global phase is + for each)
         var mul_result = p1 * p2
-        var p1_copy = PauliString(s1)
+        var p1_copy = PauliString(length, s1)
         p1_copy.prod(p2)
 
         var expected_str = "Y" * length
@@ -161,14 +161,14 @@ def test_product_simd_alignment():
 def test_product_chain():
     print("== test_product_chain")
     # Test chaining multiple product() operations
-    var p1 = PauliString("IXYZ")
-    var p2 = PauliString("YZIX")
-    var p3 = PauliString("XIZY")
+    var p1 = PauliString(4, "IXYZ")
+    var p2 = PauliString(4, "YZIX")
+    var p3 = PauliString(4, "XIZY")
 
     # Compare chained product() with multiple __mul__
     var mul_result = p1 * p2 * p3
 
-    var chain = PauliString("IXYZ")  # start with fresh copy
+    var chain = PauliString(4, "IXYZ")  # start with fresh copy
     chain.prod(p2)  # modify in place
     chain.prod(p3)  # modify in place again
 
@@ -183,10 +183,10 @@ def test_global_phase_rules_single_paulis():
     # Test anticommutation rules with actual PauliString products
     # Phase values are in log base i: 0=1, 1=i, 2=-1, 3=-i
 
-    var p_X = PauliString("X")
-    var p_Y = PauliString("Y")
-    var p_Z = PauliString("Z")
-    var p_I = PauliString("I")
+    var p_X = PauliString(1, "X")
+    var p_Y = PauliString(1, "Y")
+    var p_Z = PauliString(1, "Z")
+    var p_I = PauliString(1, "I")
 
     # Rule: XY = iZ (phase = 1 in log base i)
     var xy_result = p_X * p_Y
@@ -235,8 +235,8 @@ def test_global_phase_rules_single_paulis():
 def test_global_phase_rules_pair_paulis():
     print("== test_global_phase_rules_pair_paulis")
 
-    var p1 = PauliString("ZZ")  # Z_0 Z_1
-    var p2 = PauliString("XX")  # X_0 X_1
+    var p1 = PauliString(2, "ZZ")  # Z_0 Z_1
+    var p2 = PauliString(2, "XX")  # X_0 X_1
     var result = p1 * p2
     # Z_0 X_0 = -i Y_0
     # Z_1 X_1 = -i Y_1
@@ -258,8 +258,8 @@ def test_global_phase_rules_pair_paulis():
     # Position 3: Z*X = iY
     # Resulting Pauli String: Y I Y Y
     # Total phase: Phase(i) + Phase(+) + Phase(-i) + Phase(i) = Phase(1) + Phase(0) + Phase(3) + Phase(1) = Phase(1+0+3+1) = Phase(5) = Phase(1)
-    var p_multi1 = PauliString("ZYXZ")
-    var p_multi2 = PauliString("XYZX")
+    var p_multi1 = PauliString(4, "ZYXZ")
+    var p_multi2 = PauliString(4, "XYZX")
     var result2 = p_multi1 * p_multi2
     assert_equal(String(result2), "iYIYY")
     assert_equal(result2.global_phase.log_value, 1)
@@ -267,16 +267,16 @@ def test_global_phase_rules_pair_paulis():
 
 def test_equality():
     print("== test_equality")
-    var p1 = PauliString("IXYZ")
-    var p2 = PauliString("IXYZ")
-    var p3 = PauliString("YZIX")
+    var p1 = PauliString(4, "IXYZ")
+    var p2 = PauliString(4, "IXYZ")
+    var p3 = PauliString(4, "YZIX")
 
     assert_equal(p1, p2)
     assert_equal(p1 == p3, False)
     assert_equal(p1 != p3, True)
 
     # Test equality with phase difference
-    var p1_phase = PauliString("IXYZ", global_phase=1)  # +iIXYZ
+    var p1_phase = PauliString(4, "IXYZ", global_phase=1)  # +iIXYZ
     assert_equal(
         p1.global_phase != p1_phase.global_phase, True
     )  # Phase(0) should not equal Phase(1)
