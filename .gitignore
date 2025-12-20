@@ -1,3 +1,9 @@
 # pixi environments
 .pixi
 *.egg-info
+
+# vs code
+.vscode
+
+# mojo build
+kgen.*
