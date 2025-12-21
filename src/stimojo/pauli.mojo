@@ -44,10 +44,16 @@ struct XZEncoding(
         seed()
         encoding = XZEncoding(n_qubits)
         randint[int_type](
-            encoding.x.unsafe_ptr(), encoding.x.n_words, int_bit_width, 2**int_bit_width
+            encoding.x.unsafe_ptr(),
+            encoding.x.n_words,
+            int_bit_width,
+            2**int_bit_width,
         )
         randint[int_type](
-            encoding.z.unsafe_ptr(), encoding.x.n_words, int_bit_width, 2**int_bit_width
+            encoding.z.unsafe_ptr(),
+            encoding.x.n_words,
+            int_bit_width,
+            2**int_bit_width,
         )
         return encoding
 
@@ -169,18 +175,12 @@ struct PauliString(
     fn __init__(
         out self,
         n_qubits: Int,
-        pauli_string: Optional[String] = None,
         global_phase: Int = 0,
     ) raises:
         self.n_qubits = n_qubits
-        self.xz_encoding = XZEncoding(n_qubits=self.n_qubits)
+        self.xz_encoding = XZEncoding.random_encoding(n_qubits=self.n_qubits)
         self.global_phase = Phase(global_phase)
-
-        # store pauli string then xz_encoded it
-        self.pauli_string = pauli_string.or_else("")
-        if self.pauli_string != "":
-            self.pauli_string = self.pauli_string.upper()
-            self.xz_encode()
+        self.pauli_string = ""
 
     fn __copyinit__(out self, other: PauliString):
         self.pauli_string = other.pauli_string
@@ -204,9 +204,20 @@ struct PauliString(
     fn __ne__(self, other: PauliString) -> Bool:
         return not (self == other)
 
-    fn xz_encode(mut self) raises:
-        var s_up = self.pauli_string.as_bytes()
-        for idx in range(self.n_qubits):
+    @staticmethod
+    fn from_string(
+        pauli_string: String,
+        global_phase: Optional[Int] = None,
+    ) raises -> PauliString:
+        # Initialize PauliString
+        p = PauliString(
+            n_qubits=len(pauli_string), global_phase=global_phase.or_else(0)
+        )
+
+        # Store pauli string then xz_encoded it
+        p.pauli_string = pauli_string.upper()
+        var s_up = p.pauli_string.as_bytes()
+        for idx in range(p.n_qubits):
             var char = s_up[idx]
             if char == ord("I"):
                 x_val = 0
@@ -227,7 +238,9 @@ struct PauliString(
                     " Pauli Y.\n'Z(z)': Pauli Z.\n Global Phase should be"
                     " initialized via global_phase arg in base-i log."
                 )
-            self.xz_encoding[idx] = (x_val, z_val)
+            p.xz_encoding[idx] = (x_val, z_val)
+
+        return p
 
     @staticmethod
     fn from_xz_encoding(
@@ -236,7 +249,6 @@ struct PauliString(
     ) raises -> PauliString:
         var p = PauliString(
             input_xz.n_qubits,
-            pauli_string="",
             global_phase=global_phase.or_else(0),
         )
         p.xz_encoding = input_xz  # This will deep copy the BitVector data
