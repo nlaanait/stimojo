@@ -71,6 +71,10 @@ struct XZEncoding(
         self.x[idx] = val[0]
         self.z[idx] = val[1]
 
+    fn __setitem__(self, idx: Int, val: Tuple[Int, Int]):
+        self.x[idx] = val[0] == 1
+        self.z[idx] = val[1] == 1
+
     fn __setitem__(
         self, idx: Int, val: Tuple[Scalar[int_type], Scalar[int_type]]
     ):
@@ -178,9 +182,15 @@ struct PauliString(
         global_phase: Int = 0,
     ) raises:
         self.n_qubits = n_qubits
-        self.xz_encoding = XZEncoding.random_encoding(n_qubits=self.n_qubits)
+        self.xz_encoding = XZEncoding(self.n_qubits)
         self.global_phase = Phase(global_phase)
         self.pauli_string = ""
+
+    @staticmethod
+    fn random(n_qubits: Int) raises -> PauliString:
+        var p = PauliString(n_qubits)
+        p.xz_encoding = XZEncoding.random_encoding(n_qubits)
+        return p
 
     fn __copyinit__(out self, other: PauliString):
         self.pauli_string = other.pauli_string

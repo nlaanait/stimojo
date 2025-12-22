@@ -5,8 +5,8 @@ from time import time_function
 
 fn main() raises:
     var pauli_terms = Int(1e9)
-    var p1 = PauliString(n_qubits=pauli_terms)
-    var p2 = PauliString(n_qubits=pauli_terms)
+    var p1 = PauliString.random(n_qubits=pauli_terms)
+    var p2 = PauliString.random(n_qubits=pauli_terms)
     # print(String(p1.xz_encoding), String(p2.xz_encoding))
 
     @parameter

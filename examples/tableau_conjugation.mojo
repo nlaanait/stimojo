@@ -19,7 +19,14 @@ fn main() raises:
     # --------------------------------------------------------------------------
     # We create a PauliString "XZI". We want to apply the 2-qubit CNOT (qubits 0,1)
     # to the first two qubits of this 3-qubit string.
-    var p = PauliString("XZI")
+    var t = Tableau(3)
+    t.prepend_H_XZ(0)
+    t.prepend_ZCX(1, 2)
+
+    var p = PauliString.from_string("XZI")
+    print("Initial Pauli String: ", p)
+
+    var res = t(p)
 
     # Define target qubits [0, 1]
     var target_qubits = List[Int]()
@@ -42,7 +49,7 @@ fn main() raises:
     # 3. Out-of-Place Conjugation using `__call__` / operator()
     # --------------------------------------------------------------------------
     # Create a new PauliString "XZ" matching the tableau size exactly.
-    var p_small = PauliString("XZ")
+    var p_small = PauliString.from_string("XZ")
 
     print("\n[Out-of-Place] t(p) where t=CNOT(0,1) and p='XZ'")
     print("  Input:  " + String(p_small))

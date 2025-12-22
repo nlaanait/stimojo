@@ -30,7 +30,9 @@ fn check_eval(t: Tableau, input_str: String, expected_full_str: String) raises:
             initial_phase_val = 1
             p_in_temp = p_in_temp[1:]
 
-    var p_in = PauliString(p_in_temp, global_phase=initial_phase_val)
+    var p_in = PauliString.from_string(
+        p_in_temp, global_phase=initial_phase_val
+    )
     var p_out = t.eval(p_in)
 
     assert_equal(
@@ -64,7 +66,7 @@ fn check_apply_within(
             initial_phase = 1
             p_temp_str = p_temp_str[1:]
 
-    var p = PauliString(p_temp_str, global_phase=initial_phase)
+    var p = PauliString.from_string(p_temp_str, global_phase=initial_phase)
 
     t.apply_within(p, target_qubits)
 
@@ -122,15 +124,15 @@ def test_direct_h_xy():
     print("== test_direct_h_xy")
     var t = Tableau(1)
     t.prepend_H_XY(0)
-    var p_in = PauliString("X")  # This now implies +X
+    var p_in = PauliString.from_string("X")  # This now implies +X
     var p_out = t.eval(p_in)
     assert_equal(String(p_out), "+Y")
 
-    p_in = PauliString("Y")  # This now implies +Y
+    p_in = PauliString.from_string("Y")  # This now implies +Y
     p_out = t.eval(p_in)
     assert_equal(String(p_out), "+X")
 
-    p_in = PauliString("Z")  # This now implies +Z
+    p_in = PauliString.from_string("Z")  # This now implies +Z
     p_out = t.eval(p_in)
     assert_equal(String(p_out), "-Z")
 
@@ -170,11 +172,11 @@ def test_call_operator():
     var t = Tableau(1)
     t.prepend_H_XZ(0)  # H gate: X->Z, Z->X
 
-    var p_x = PauliString("X")
+    var p_x = PauliString.from_string("X")
     var res_x = t(p_x)
     assert_equal(String(res_x), "+Z")
 
-    var p_z = PauliString("Z")
+    var p_z = PauliString.from_string("Z")
     var res_z = t(p_z)
     assert_equal(String(res_z), "+X")
 
@@ -228,7 +230,7 @@ def test_call_and_apply_within_equivalence():
     var t_cx = Tableau(t_n_qubits)
     t_cx.apply_CX(0, 1)  # CNOT on 0,1
 
-    var p_orig = PauliString("IX", global_phase=1)  # Initial +iIX
+    var p_orig = PauliString.from_string("IX", global_phase=1)  # Initial +iIX
     var expected_full_str = "iIX"  # CNOT on IX -> IX, so phase should remain i
 
     # Using __call__ (out-of-place)
@@ -251,7 +253,7 @@ def test_call_and_apply_within_equivalence():
     var t_h = Tableau(t_n_qubits)
     t_h.apply_hadamard(0)  # H on 0
 
-    var p_orig_large = PauliString("XIZ")  # +XIZ
+    var p_orig_large = PauliString.from_string("XIZ")  # +XIZ
     var expected_full_str_large = "+ZIZ"  # H on X -> Z, so +ZIZ
 
     # Using apply_within on a subsystem (qubit 0)
@@ -262,7 +264,7 @@ def test_call_and_apply_within_equivalence():
     assert_equal(String(p_within_large), expected_full_str_large)
 
     # Simulating __call__ behavior for a subsystem for comparison
-    var p_subsystem_orig = PauliString("X")  # Subsystem X from XIZ
+    var p_subsystem_orig = PauliString.from_string("X")  # Subsystem X from XIZ
     var p_subsystem_called = t_h(p_subsystem_orig)  # H(X) = Z
 
     # Construct the expected larger string
@@ -277,7 +279,7 @@ def test_call_and_apply_within_equivalence():
     # Demonstrate that direct __call__ on mismatched sizes raises an error (as implemented)
     var t_small = Tableau(1)
     try:
-        var p_mismatched = PauliString("XX")
+        var p_mismatched = PauliString.from_string("XX")
         _ = t_small(p_mismatched)
         assert_equal(True, False)  # Should not reach here
     except e:
