@@ -62,7 +62,7 @@ def test_simd_mul_lengths():
     print("== test_simd_mul_lengths")
     # Test multiplication with different length combinations
     # With bit packing, we process blocks of 'vector_bit_width' bits.
-    
+
     var len_sub = vector_bit_width // 2
     var len_over = vector_bit_width * 2 + 10
 

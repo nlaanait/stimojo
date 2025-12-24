@@ -184,7 +184,7 @@ struct PauliString(
         self.n_qubits = n_qubits
         self.xz_encoding = XZEncoding(self.n_qubits)
         self.global_phase = Phase(global_phase)
-        self.pauli_string = ""
+        self.pauli_string = ""  # don't populate until __str__() is invoked
 
     @staticmethod
     fn random(n_qubits: Int) raises -> PauliString:
@@ -283,7 +283,7 @@ struct PauliString(
         SIMD[int_type, simd_width],
         SIMD[int_type, simd_width],
     ]:
-        """Computes XOR of XZEncoding across 1 SIMD lane while tracking phase.
+        """Computes XOR of 2 XZEncodings across 1 SIMD lane while tracking phase.
         """
         var x_result = x ^ other_x
         var z_result = z ^ other_z
@@ -304,7 +304,7 @@ struct PauliString(
         """In-Place product of 2 PauliStrings."""
 
         # allocate ptr with 2 * simd_width to store accumulated phase factors
-        var accum_ptr = alloc[UInt64](2 * simd_width)
+        var accum_ptr = alloc[Scalar[int_type]](2 * simd_width)
         memset(accum_ptr, 0, 2 * simd_width)
 
         # function to compute Pauli products across a simd lane
