@@ -5,6 +5,7 @@ from collections.list import List
 from sys import simd_width_of
 from bit import pop_count
 from random import randint, seed
+from complex import ComplexScalar
 
 from layout import Layout, LayoutTensor, RuntimeLayout, UNKNOWN_VALUE
 from utils import Index
@@ -14,11 +15,41 @@ from .bit_tensor import BitVector, int_type, simd_width, int_bit_width
 struct XZEncoding(
     Copyable, EqualityComparable, ImplicitlyCopyable, Movable, Stringable
 ):
+    """Stores the X and Z components of a Pauli string using a bit-packed representation.
+
+    The encoding uses two bit vectors of length `n_qubits`:
+    - `x` bits: 1 if the Pauli operator has an X component (X or Y).
+    - `z` bits: 1 if the Pauli operator has a Z component (Z or Y).
+
+    Mapping:
+    - I: x=0, z=0
+    - X: x=1, z=0
+    - Z: x=0, z=1
+    - Y: x=1, z=1
+
+    Example:
+    ```mojo
+    from stimojo.pauli import XZEncoding
+
+    var encoding = XZEncoding(2)
+    # Set qubit 0 to X (x=1, z=0)
+    encoding[0] = (1, 0)
+    # Set qubit 1 to Z (x=0, z=1)
+    encoding[1] = (0, 1)
+    print(String(encoding)) # Prints "XZ"
+    ```
+    """
+
     var n_qubits: Int
     var x: BitVector
     var z: BitVector
 
     fn __init__(out self, n_qubits: Int):
+        """Initializes an empty XZEncoding (all Identity).
+
+        Args:
+            n_qubits: The number of qubits.
+        """
         self.n_qubits = n_qubits
         self.x = BitVector(n_qubits)
         self.z = BitVector(n_qubits)
@@ -122,9 +153,36 @@ struct XZEncoding(
 struct Phase(
     Copyable, EqualityComparable, ImplicitlyCopyable, Movable, Stringable
 ):
+    """Represents a phase as a log of base i.
+
+    The phase is stored as an integer `k` representing `i^k`.
+    - 0 -> 1
+    - 1 -> i
+    - 2 -> -1
+    - 3 -> -i
+
+    Example:
+    ```mojo
+    from stimojo.pauli import Phase
+
+    var p = Phase(1) # represents i
+    print(String(p)) # Prints "i"
+    var p2 = p + 2 # i * (-1) = -i -> log value 3
+    print(String(p2)) # Prints "-i"
+    ```
+    """
+
+    comptime J = ComplexScalar[DType.int8](
+        re=SIMD[DType.int8, 1](0), im=SIMD[DType.int8, 1](1)
+    )
     var log_value: Int
 
     fn __init__(out self, value: Int) raises:
+        """Initializes the Phase.
+
+        Args:
+            value: The exponent of i (will be taken modulo 4).
+        """
         self.log_value = value % 4
         self._validate()
 
@@ -167,10 +225,33 @@ struct Phase(
                 " -->-1, 3 -->-i"
             )
 
+    fn exponent(self) -> ComplexScalar[DType.int8]:
+        var exponent = ComplexScalar[DType.int8](
+            re=SIMD[DType.int8, 1](1), im=SIMD[DType.int8, 1](0)
+        )
+        for _ in range(self.log_value):
+            exponent *= self.J
+        return exponent
+
 
 struct PauliString(
     Copyable, EqualityComparable, ImplicitlyCopyable, Movable, Stringable
 ):
+    """Represents a tensor products of Paulis with a global phase.
+
+    A PauliString consists of an `XZEncoding` for the operator on each qubit
+    and a global `Phase`.
+
+    Example:
+    ```mojo
+    from stimojo.pauli import PauliString
+
+    # Create from string "XY" with phase i (log_value=1)
+    var p1 = PauliString.from_string("XY", 1)
+    print(String(p1)) # Prints "iXY"
+    ```
+    """
+
     var pauli_string: String
     var xz_encoding: XZEncoding
     var n_qubits: Int
@@ -181,6 +262,12 @@ struct PauliString(
         n_qubits: Int,
         global_phase: Int = 0,
     ) raises:
+        """Initializes a PauliString with identity operators.
+
+        Args:
+            n_qubits: The number of qubits.
+            global_phase: The global phase exponent k (for i^k). Defaults to 0 (+1).
+        """
         self.n_qubits = n_qubits
         self.xz_encoding = XZEncoding(self.n_qubits)
         self.global_phase = Phase(global_phase)
@@ -188,6 +275,11 @@ struct PauliString(
 
     @staticmethod
     fn random(n_qubits: Int) raises -> PauliString:
+        """Generates a random PauliString.
+
+        Args:
+            n_qubits: The number of qubits.
+        """
         var p = PauliString(n_qubits)
         p.xz_encoding = XZEncoding.random_encoding(n_qubits)
         return p
@@ -219,6 +311,18 @@ struct PauliString(
         pauli_string: String,
         global_phase: Optional[Int] = None,
     ) raises -> PauliString:
+        """Creates a PauliString from a string representation.
+
+        Args:
+            pauli_string: String containing characters 'I', 'X', 'Y', 'Z'.
+            global_phase: Optional initial phase exponent. Defaults to 0.
+
+        Returns:
+            The constructed PauliString.
+
+        Raises:
+            Error: If an invalid character is encountered.
+        """
         # Initialize PauliString
         p = PauliString(
             n_qubits=len(pauli_string), global_phase=global_phase.or_else(0)
@@ -257,6 +361,7 @@ struct PauliString(
         input_xz: XZEncoding,
         global_phase: Optional[Int] = None,
     ) raises -> PauliString:
+        """Creates a PauliString from an existing XZEncoding."""
         var p = PauliString(
             input_xz.n_qubits,
             global_phase=global_phase.or_else(0),
@@ -301,7 +406,15 @@ struct PauliString(
         return res
 
     fn prod(mut self, other: PauliString) raises:
-        """In-Place product of 2 PauliStrings."""
+        """In-Place product of 2 PauliStrings (self = self * other).
+
+        This method updates the current PauliString by multiplying it with another.
+        It computes the new XZ components using bitwise operations and updates
+        the global phase based on commutation relations.
+
+        Args:
+            other: The PauliString to multiply with.
+        """
 
         # allocate ptr with 2 * simd_width to store accumulated phase factors
         var accum_ptr = alloc[Scalar[int_type]](2 * simd_width)

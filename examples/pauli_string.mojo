@@ -1,8 +1,4 @@
 from stimojo.pauli import PauliString
-from stimojo.ops import phase_from_log_base_i
-from math import log2
-from complex import ComplexScalar
-from python import Python
 
 
 fn main() raises:
@@ -16,7 +12,7 @@ fn main() raises:
         )
     )
 
-    var exp_phase = phase_from_log_base_i(p3.global_phase.log_value)
+    var exp_phase = p3.global_phase.exponent()
 
     print("Result: {}".format(String(p3)))
     print("Global phase (log base-i): {}".format(p3.global_phase.log_value))

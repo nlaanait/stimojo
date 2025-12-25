@@ -19,7 +19,7 @@ fn main() raises:
         )
     )
 
-    report = benchmark.run[bench_inplace](max_runtime_secs=5)
+    report = benchmark.run[bench_inplace](max_runtime_secs=15)
     report.print(unit=benchmark.Unit.s)
 
     print(
@@ -32,5 +32,5 @@ fn main() raises:
     fn bench_outplace() raises:
         _ = p1 * p2
 
-    report = benchmark.run[bench_outplace](max_runtime_secs=5)
+    report = benchmark.run[bench_outplace](max_runtime_secs=15)
     report.print(unit=benchmark.Unit.s)

@@ -95,5 +95,33 @@ def test_phase_equality():
     assert_equal(Phase(0) == Phase(4), True)
 
 
+def test_exponent():
+    print("== test_exponent")
+    # 0 -> 1
+    var p0 = Phase(0).exponent()
+    assert_equal(p0.re, 1)
+    assert_equal(p0.im, 0)
+
+    # 1 -> i
+    var p1 = Phase(1).exponent()
+    assert_equal(p1.re, 0)
+    assert_equal(p1.im, 1)
+
+    # 2 -> -1
+    var p2 = Phase(2).exponent()
+    assert_equal(p2.re, -1)
+    assert_equal(p2.im, 0)
+
+    # 3 -> -i
+    var p3 = Phase(3).exponent()
+    assert_equal(p3.re, 0)
+    assert_equal(p3.im, -1)
+
+    # 4 -> 1 (cyclic)
+    var p4 = Phase(4).exponent()
+    assert_equal(p4.re, 1)
+    assert_equal(p4.im, 0)
+
+
 fn main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
