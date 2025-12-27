@@ -1,18 +1,9 @@
-from memory import memset, memcpy, UnsafePointer
 from algorithm import vectorize
-from utils import Index
 from collections.list import List
-from math import align_up
 
-from stimojo.pauli import PauliString, Phase
-from stimojo.bit_tensor import (
-    BitVector,
-    BitMatrix,
-    simd_width,
-    int_type,
-    int_bit_exp,
-    int_bit_width,
-)
+from . import simd_width, int_type, int_bit_exp, int_bit_width
+from .pauli import PauliString, Phase
+from .bit_tensor import BitVector, BitMatrix
 
 
 struct Tableau(Copyable, Movable):

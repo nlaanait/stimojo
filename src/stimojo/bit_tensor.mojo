@@ -2,20 +2,11 @@ from memory import alloc, memset, memcpy, UnsafePointer
 from layout import Layout, LayoutTensor, RuntimeLayout, UNKNOWN_VALUE
 from utils import Index
 from math import align_up, log2
-from sys import simd_width_of
+from sys import simd_width_of, bit_width_of
 from algorithm import vectorize
-from sys import bit_width_of
-from sys.param_env import is_defined, env_get_dtype
+from sys.param_env import env_get_dtype
 
-# compile-time parameters used throughout stimojo modules
-
-# defined during build_time
-comptime int_type = env_get_dtype["STIMOJO_INT_TYPE", DType.uint16]()
-
-# inferred from int_type
-comptime int_bit_width = bit_width_of[int_type]()
-comptime int_bit_exp = Int(log2(SIMD[DType.float64, 1](int_bit_width)))
-comptime simd_width = simd_width_of[int_type]()
+from . import int_type, int_bit_exp, int_bit_width, simd_width
 
 
 struct BitVector(

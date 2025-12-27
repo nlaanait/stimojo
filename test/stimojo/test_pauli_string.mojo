@@ -31,7 +31,7 @@ def test_mul_produces_expected():
     var expected_str = "Y" * (4 * repeats)
     assert_equal(String(prod), "+" + expected_str)
     assert_equal(
-        prod.global_phase.log_value, 0
+        prod.global_phase, Phase(0)
     )  # X*Y=iZ, Y*Z=iX, Z*X=iY. Sum of phases for IXYZ * YZIX should be 0.
 
 
@@ -43,10 +43,7 @@ def test_simd_boundary():
     assert_equal(String(enc_short), "+I")
 
     # Sub-SIMD (less than 1 vector width of bits)
-    # e.g. 150 chars if width is 256. If width is 64 (simd_width=1), 150 is > 64.
-    # Let's use something that is likely > 1 word but < 1 vector (if vector > 1 word)
-    # Or just something reasonable like 100.
-    var sub_len = 100
+    var sub_len = vector_bit_width - 10
     var sub_simd = "I" * sub_len
     var enc_sub = PauliString.from_string(sub_simd)
     assert_equal(String(enc_sub), "+" + sub_simd)
@@ -72,16 +69,16 @@ def test_simd_mul_lengths():
     var p1 = PauliString.from_string(s_sub)
     var p2 = PauliString.from_string(s_sub)
     var prod = p1 * p2
-    # Each position XORs with itself, should give all I's, phase '+'
+    # Should give all I's
     assert_equal(String(prod), "+" + s_sub)
-    assert_equal(prod.global_phase.log_value, 0)
+    assert_equal(prod.global_phase, Phase(0))
 
-    # Now try longer strings that need multiple SIMD ops
+    # longer strings that need multiple SIMD ops
     var p3 = PauliString.from_string(s_over)
     var p4 = PauliString.from_string(s_over)
     var long_prod = p3 * p4
     assert_equal(String(long_prod), "+" + s_over)
-    assert_equal(long_prod.global_phase.log_value, 0)
+    assert_equal(long_prod.global_phase, Phase(0))
 
 
 def test_invalid_chars():
@@ -104,7 +101,7 @@ def test_mixed_case_mul():
     assert_equal(
         String(prod), "+YYYY"
     )  # Result should be normalized to uppercase, with '+' phase
-    assert_equal(prod.global_phase.log_value, 0)
+    assert_equal(prod.global_phase, Phase(0))
 
 
 def test_product_vs_mul():
@@ -116,17 +113,13 @@ def test_product_vs_mul():
         var p1 = PauliString.from_string(inputs[i])
         for j in range(len(inputs)):
             var p2 = PauliString.from_string(inputs[j])
-            # Get result via __mul__
             var mul_result = p1 * p2
-            # Get result via product
-            var p1_copy = PauliString.from_string(
-                inputs[i]
-            )  # fresh copy since product modifies in-place
+            var p1_copy = PauliString.from_string(inputs[i])
             p1_copy.prod(p2)
             assert_equal(String(p1_copy), String(mul_result))
             assert_equal(
-                p1_copy.global_phase.log_value,
-                mul_result.global_phase.log_value,
+                p1_copy.global_phase,
+                mul_result.global_phase,
             )
 
 
@@ -156,17 +149,13 @@ def test_product_simd_alignment():
         var expected_str = "Y" * length
         # X*Z=-iY, so total phase for n 'X' * 'Z' = (-i)^n
         # This is (length * 3) % 4.
-        var expected_phase = (length * 3) % 4
+        var expected_phase = Phase(length * 3)
 
-        assert_equal(
-            String(mul_result), String(Phase(expected_phase)) + expected_str
-        )
-        assert_equal(mul_result.global_phase.log_value, expected_phase)
+        assert_equal(String(mul_result), String(expected_phase) + expected_str)
+        assert_equal(mul_result.global_phase, expected_phase)
 
-        assert_equal(
-            String(p1_copy), String(Phase(expected_phase)) + expected_str
-        )
-        assert_equal(p1_copy.global_phase.log_value, expected_phase)
+        assert_equal(String(p1_copy), String(expected_phase) + expected_str)
+        assert_equal(p1_copy.global_phase, expected_phase)
 
 
 def test_product_chain():
@@ -184,9 +173,7 @@ def test_product_chain():
     chain.prod(p3)  # modify in place again
 
     assert_equal(String(chain), String(mul_result))
-    assert_equal(
-        chain.global_phase.log_value, mul_result.global_phase.log_value
-    )
+    assert_equal(chain.global_phase, mul_result.global_phase)
 
 
 def test_global_phase_rules_single_paulis():
@@ -202,45 +189,45 @@ def test_global_phase_rules_single_paulis():
     # Rule: XY = iZ (phase = 1 in log base i)
     var xy_result = p_X * p_Y
     assert_equal(String(xy_result), "iZ")
-    assert_equal(xy_result.global_phase.log_value, 1)
+    assert_equal(xy_result.global_phase, Phase(1))
 
     # Rule: YZ = iX (phase = 1 in log base i)
     var yz_result = p_Y * p_Z
     assert_equal(String(yz_result), "iX")
-    assert_equal(yz_result.global_phase.log_value, 1)
+    assert_equal(yz_result.global_phase, Phase(1))
 
     # Rule: ZX = iY (phase = 1 in log base i)
     var zx_result = p_Z * p_X
     assert_equal(String(zx_result), "iY")
-    assert_equal(zx_result.global_phase.log_value, 1)
+    assert_equal(zx_result.global_phase, Phase(1))
 
     # Rule: YX = -iZ (phase = 3 in log base i)
     var yx_result = p_Y * p_X
     assert_equal(String(yx_result), "-iZ")
-    assert_equal(yx_result.global_phase.log_value, 3)
+    assert_equal(yx_result.global_phase, Phase(3))
 
     # Rule: ZY = -iX (phase = 3 in log base i)
     var zy_result = p_Z * p_Y
     assert_equal(String(zy_result), "-iX")
-    assert_equal(zy_result.global_phase.log_value, 3)
+    assert_equal(zy_result.global_phase, Phase(3))
 
     # Rule: XZ = -iY (phase = 3 in log base i)
     var xz_result = p_X * p_Z
     assert_equal(String(xz_result), "-iY")
-    assert_equal(xz_result.global_phase.log_value, 3)
+    assert_equal(xz_result.global_phase, Phase(3))
 
     # Identity commutes with everything (phase = 0)
     var xi_result = p_X * p_I
     assert_equal(String(xi_result), "+X")
-    assert_equal(xi_result.global_phase.log_value, 0)
+    assert_equal(xi_result.global_phase, Phase(0))
 
     var yi_result = p_Y * p_I
     assert_equal(String(yi_result), "+Y")
-    assert_equal(yi_result.global_phase.log_value, 0)
+    assert_equal(yi_result.global_phase, Phase(0))
 
     var zi_result = p_Z * p_I
     assert_equal(String(zi_result), "+Z")
-    assert_equal(zi_result.global_phase.log_value, 0)
+    assert_equal(zi_result.global_phase, Phase(0))
 
 
 def test_global_phase_rules_pair_paulis():
@@ -253,14 +240,14 @@ def test_global_phase_rules_pair_paulis():
     # Z_1 X_1 = -i Y_1
     # Product = (-i Y_0) (-i Y_1) = (-i)^2 Y_0 Y_1 = - Y_0 Y_1
     assert_equal(String(result), "-YY")
-    assert_equal(result.global_phase.log_value, 2)
+    assert_equal(result.global_phase, Phase(2))
 
     var result1 = p2 * p1
     # X_0 Z_0 = -i Y_0
     # X_1 Z_1 = -i Y_1
     # Product = (-i Y_0) (-i Y_1) = (-i)^2 Y_0 Y_1 = - Y_0 Y_1
     assert_equal(String(result1), "-YY")
-    assert_equal(result1.global_phase.log_value, 2)
+    assert_equal(result1.global_phase, Phase(2))
 
     # ZYXZ * XYZX: multiple anticommutations
     # Position 0: Z*X = iY
@@ -273,7 +260,7 @@ def test_global_phase_rules_pair_paulis():
     var p_multi2 = PauliString.from_string("XYZX")
     var result2 = p_multi1 * p_multi2
     assert_equal(String(result2), "iYIYY")
-    assert_equal(result2.global_phase.log_value, 1)
+    assert_equal(result2.global_phase, Phase(1))
 
 
 def test_equality():

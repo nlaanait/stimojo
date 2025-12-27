@@ -1,15 +1,11 @@
-from memory import memset, memcpy, UnsafePointer, alloc
-from math import align_up, log2
+from memory import memset, UnsafePointer, alloc
 from algorithm import vectorize
-from collections.list import List
-from sys import simd_width_of
 from bit import pop_count
 from random import randint, seed
 from complex import ComplexScalar
 
-from layout import Layout, LayoutTensor, RuntimeLayout, UNKNOWN_VALUE
-from utils import Index
-from .bit_tensor import BitVector, int_type, simd_width, int_bit_width
+from .bit_tensor import BitVector
+from . import int_type, simd_width, int_bit_width
 
 
 struct XZEncoding(

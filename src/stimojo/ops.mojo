@@ -1,5 +1,3 @@
-from bit import pop_count
-
 from .pauli import PauliString
 
 
