@@ -2,7 +2,7 @@ from algorithm import vectorize
 from collections.list import List
 
 from . import simd_width, int_type, int_bit_exp, int_bit_width
-from .pauli import PauliString, Phase
+from .pauli import PauliString, Phase, XZEncoding
 from .bit_tensor import BitVector, BitMatrix
 
 
@@ -76,16 +76,9 @@ struct Tableau(Copyable, Movable):
         if not self.is_pauli_product():
             raise Error("The Tableau isn't equivalent to a Pauli product.")
 
-        var p = PauliString.from_string("I" * self.n_qubits)
-
-        for k in range(self.n_qubits):
-            var x_val = self._zs_signs[k]
-            var z_val = self._xs_signs[k]
-
-            p.xz_encoding.x[k] = x_val
-            p.xz_encoding.z[k] = z_val
-
-        p.pauli_string = String(p.xz_encoding)
+        var p = PauliString.from_xz_encoding(
+            XZEncoding.from_bitvectors(x=self._zs_signs, z=self._xs_signs)
+        )
         return p^
 
     fn _swap_rows(mut self, half: Int, r1: Int, r2: Int):

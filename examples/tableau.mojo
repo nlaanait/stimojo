@@ -4,21 +4,22 @@ from stimojo.tableau import Tableau
 fn main() raises:
     var n_qubits = 2
     var t = Tableau(n_qubits)
+    print("Initial Tableau (Identity):")
     print(String(t.to_pauli_string()))
 
-    print("Initial Tableau (Identity):")
-    print_tableau(t)
+    print("Tableau binary matrix representation")
+    print(t.__str__())
 
-    print("\nApplying Hadamard on qubit 1:")
-    t.apply_hadamard(1)
+    print("\nApplying ZY on qubit=1.\nApplying X on qubit=2")
+    t.apply_Z(1)
+    t.apply_Y(1)
+    t.apply_X(0)
 
-    try:
-        print(String(t.to_pauli_string()))
-    except e:
-        print("Error converting to PauliString: " + String(e))
+    print("Resultant Tableau (Pauli String Rep):")
+    print(String(t.to_pauli_string()))
 
-    print("\nTableau after H on qubit 1:")
-    print_tableau(t)
+    print("Tableau binary matrix representation")
+    print(t.__str__())
 
 
 # Helper function to print a Tableau

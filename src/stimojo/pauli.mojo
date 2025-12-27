@@ -67,6 +67,13 @@ struct XZEncoding(
         return s
 
     @staticmethod
+    fn from_bitvectors(x: BitVector, z: BitVector) -> XZEncoding:
+        var xz = XZEncoding(x.n_bits)
+        xz.x = x
+        xz.z = z
+        return xz^
+
+    @staticmethod
     fn random_encoding(n_qubits: Int) -> XZEncoding:
         seed()
         encoding = XZEncoding(n_qubits)
