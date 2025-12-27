@@ -175,7 +175,7 @@ struct Phase(
     comptime J = ComplexScalar[DType.int8](
         re=SIMD[DType.int8, 1](0), im=SIMD[DType.int8, 1](1)
     )
-    var log_value: Int
+    var value: Int
 
     fn __init__(out self, value: Int) raises:
         """Initializes the Phase.
@@ -183,35 +183,35 @@ struct Phase(
         Args:
             value: The exponent of i (will be taken modulo 4).
         """
-        self.log_value = value % 4
+        self.value = value % 4
         self._validate()
 
     fn __str__(self) -> String:
         var str_phase = String()
-        if self.log_value % 4 == 0:
+        if self.value % 4 == 0:
             str_phase = "+"
-        elif self.log_value % 4 == 1:
+        elif self.value % 4 == 1:
             str_phase = "i"
-        elif self.log_value % 4 == 2:
+        elif self.value % 4 == 2:
             str_phase = "-"
-        elif self.log_value % 4 == 3:
+        elif self.value % 4 == 3:
             str_phase = "-i"
         return str_phase
 
     fn __add__(self, other: Phase) raises -> Phase:
-        return Phase(self.log_value + other.log_value)
+        return Phase(self.value + other.value)
 
     fn __add__(self, other: Int) raises -> Phase:
         return self + Phase(other)
 
     fn __iadd__(mut self, other: Phase):
-        self.log_value = (self.log_value + other.log_value) % 4
+        self.value = (self.value + other.value) % 4
 
     fn __iadd__(mut self, other: Int):
-        self.log_value = (self.log_value + other) % 4
+        self.value = (self.value + other) % 4
 
     fn __eq__(self, other: Phase) -> Bool:
-        if self.log_value != other.log_value:
+        if self.value != other.value:
             return False
         return True
 
@@ -219,7 +219,7 @@ struct Phase(
         return not (self == other)
 
     fn _validate(self) raises:
-        if not (self.log_value in [0, 1, 2, 3]):
+        if not (self.value in [0, 1, 2, 3]):
             raise Error(
                 "Phase should be given in log-i base (mod 4):\n0 -->1, 1-->i, 2"
                 " -->-1, 3 -->-i"
@@ -229,7 +229,7 @@ struct Phase(
         var exponent = ComplexScalar[DType.int8](
             re=SIMD[DType.int8, 1](1), im=SIMD[DType.int8, 1](0)
         )
-        for _ in range(self.log_value):
+        for _ in range(self.value):
             exponent *= self.J
         return exponent
 
@@ -246,7 +246,7 @@ struct PauliString(
     ```mojo
     from stimojo.pauli import PauliString
 
-    # Create from string "XY" with phase i (log_value=1)
+    # Create from string "XY" with phase i (value=1)
     var p1 = PauliString.from_string("XY", 1)
     print(String(p1)) # Prints "iXY"
     ```

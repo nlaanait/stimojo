@@ -644,7 +644,7 @@ struct Tableau(Copyable, Movable):
         var p1 = self._row_to_pauli(target_half, target_row)
         var p2 = self._row_to_pauli(source_half, source_row)
         p1.prod(p2)
-        p1.global_phase = Phase(p1.global_phase.log_value & 2)
+        p1.global_phase = Phase(p1.global_phase.value & 2)
         self._pauli_to_row(p1, target_half, target_row)
 
     fn prepend_H_XY(mut self, q: Int) raises:

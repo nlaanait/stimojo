@@ -5,15 +5,17 @@ from math import align_up, log2
 from sys import simd_width_of
 from algorithm import vectorize
 from sys import bit_width_of
-
+from sys.param_env import is_defined, env_get_dtype
 
 # compile-time parameters used throughout stimojo modules
-comptime int_type = DType.uint64  # can be changed
-comptime int_bit_width = bit_width_of[int_type]()  # must be inferred
-comptime int_bit_exp = Int(
-    log2(SIMD[DType.float64, 1](int_bit_width))
-)  # must be inferred
-comptime simd_width = simd_width_of[int_type]()  # must be inferred
+
+# defined during build_time
+comptime int_type = env_get_dtype["STIMOJO_INT_TYPE", DType.uint16]()
+
+# inferred from int_type
+comptime int_bit_width = bit_width_of[int_type]()
+comptime int_bit_exp = Int(log2(SIMD[DType.float64, 1](int_bit_width)))
+comptime simd_width = simd_width_of[int_type]()
 
 
 struct BitVector(

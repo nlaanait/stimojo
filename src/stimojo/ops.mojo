@@ -1,7 +1,7 @@
-from sys import simd_width_of
 from bit import pop_count
 
-from stimojo.pauli import PauliString
+from .pauli import PauliString
+
 
 # TODO: check for commutation
 fn commutes(p1: PauliString, p2: PauliString) -> Bool:
