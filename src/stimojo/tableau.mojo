@@ -134,204 +134,208 @@ struct Tableau(Copyable, Movable):
     # === Operations ===
 
     fn apply_hadamard(mut self, q: Int):
-        for k in range(self.n_qubits):
-            # XS
-            var x = self._xs_xt[k, q]
-            var z = self._xs_zt[k, q]
-            if x and z:
-                self._xs_signs[k] = not self._xs_signs[k]
-            self._xs_xt[k, q] = z
-            self._xs_zt[k, q] = x
+        # Apply H to qubit q:
+        # signs ^= (Z_column[q] & X_column[q])
+        # swaps: X_column[q] <--> Z_column[q]
 
-            # ZS
-            x = self._zs_xt[k, q]
-            z = self._zs_zt[k, q]
-            if x and z:
-                self._zs_signs[k] = not self._zs_signs[k]
-            self._zs_xt[k, q] = z
-            self._zs_zt[k, q] = x
+        @always_inline
+        @parameter
+        fn vec_body[width: Int](w_idx: Int):
+            # Load column words from XS and ZS matrices
+            var xs_xt = self._xs_xt.load_col[width=width](q, w_idx)
+            var xs_zt = self._xs_zt.load_col[width=width](q, w_idx)
+            var zs_xt = self._zs_xt.load_col[width=width](q, w_idx)
+            var zs_zt = self._zs_zt.load_col[width=width](q, w_idx)
+
+            # Load signs words
+            var xs_signs = self._xs_signs.load[width=width](w_idx)
+            var zs_signs = self._zs_signs.load[width=width](w_idx)
+
+            # XOR signs
+            self._xs_signs.store[width=width](w_idx, xs_signs ^ (xs_xt & xs_zt))
+            self._zs_signs.store[width=width](w_idx, zs_signs ^ (zs_xt & zs_zt))
+
+            # swap x,z cols
+            self._xs_xt.store_col[width=width](q, w_idx, xs_zt)
+            self._xs_zt.store_col[width=width](q, w_idx, xs_xt)
+            self._zs_xt.store_col[width=width](q, w_idx, zs_zt)
+            self._zs_zt.store_col[width=width](q, w_idx, zs_xt)
+
+        vectorize[vec_body, simd_width](self._xs_signs.n_words)
 
     fn apply_X(mut self, q: Int):
         # Apply X to qubit q:
-        # Signs ^= Z_column[q]
-        # With new layout, column q is contiguous and packed same as Signs.
+        # signs ^= Z_column[q]
+
         @always_inline
         @parameter
         fn vec_body[width: Int](w_idx: Int):
             # Load column words from ZT matrices
-            var v_xs_zt = self._xs_zt.load_col[width=width](q, w_idx)
-            var v_zs_zt = self._zs_zt.load_col[width=width](q, w_idx)
+            var xs_zt = self._xs_zt.load_col[width=width](q, w_idx)
+            var zs_zt = self._zs_zt.load_col[width=width](q, w_idx)
 
             # Load signs words
-            var v_xs_signs = self._xs_signs.load[width=width](w_idx)
-            var v_zs_signs = self._zs_signs.load[width=width](w_idx)
+            var xs_signs = self._xs_signs.load[width=width](w_idx)
+            var zs_signs = self._zs_signs.load[width=width](w_idx)
 
-            # XOR
-            self._xs_signs.store[width=width](w_idx, v_xs_signs ^ v_xs_zt)
-            self._zs_signs.store[width=width](w_idx, v_zs_signs ^ v_zs_zt)
+            # XOR signs
+            self._xs_signs.store[width=width](w_idx, xs_signs ^ xs_zt)
+            self._zs_signs.store[width=width](w_idx, zs_signs ^ zs_zt)
 
         vectorize[vec_body, simd_width](self._xs_signs.n_words)
 
     fn apply_Y(mut self, q: Int):
         # Apply Y to qubit q:
         # Signs ^= X_column[q] ^ Z_column[q]
+
         @always_inline
         @parameter
         fn vec_body[width: Int](w_idx: Int):
-            var v_xs_xt = self._xs_xt.load_col[width=width](q, w_idx)
-            var v_xs_zt = self._xs_zt.load_col[width=width](q, w_idx)
-            var v_zs_xt = self._zs_xt.load_col[width=width](q, w_idx)
-            var v_zs_zt = self._zs_zt.load_col[width=width](q, w_idx)
+            # Load column words from XS and ZS matrices
+            var xs_xt = self._xs_xt.load_col[width=width](q, w_idx)
+            var xs_zt = self._xs_zt.load_col[width=width](q, w_idx)
+            var zs_xt = self._zs_xt.load_col[width=width](q, w_idx)
+            var zs_zt = self._zs_zt.load_col[width=width](q, w_idx)
 
-            var v_xs_signs = self._xs_signs.load[width=width](w_idx)
-            var v_zs_signs = self._zs_signs.load[width=width](w_idx)
+            # Load signs words
+            var xs_signs = self._xs_signs.load[width=width](w_idx)
+            var zs_signs = self._zs_signs.load[width=width](w_idx)
 
-            self._xs_signs.store[width=width](
-                w_idx, v_xs_signs ^ v_xs_xt ^ v_xs_zt
-            )
-            self._zs_signs.store[width=width](
-                w_idx, v_zs_signs ^ v_zs_xt ^ v_zs_zt
-            )
+            # XOR signs
+            self._xs_signs.store[width=width](w_idx, xs_signs ^ xs_xt ^ xs_zt)
+            self._zs_signs.store[width=width](w_idx, zs_signs ^ zs_xt ^ zs_zt)
 
         vectorize[vec_body, simd_width](self._xs_signs.n_words)
 
     fn apply_Z(mut self, q: Int):
         # Apply Z to qubit q:
         # Signs ^= X_column[q]
+
         @always_inline
         @parameter
         fn vec_body[width: Int](w_idx: Int):
-            var v_xs_xt = self._xs_xt.load_col[width=width](q, w_idx)
-            var v_zs_xt = self._zs_xt.load_col[width=width](q, w_idx)
+            # Load column words from XS matrices
+            var xs_xt = self._xs_xt.load_col[width=width](q, w_idx)
+            var zs_xt = self._zs_xt.load_col[width=width](q, w_idx)
 
-            var v_xs_signs = self._xs_signs.load[width=width](w_idx)
-            var v_zs_signs = self._zs_signs.load[width=width](w_idx)
+            # Load signs
+            var xs_signs = self._xs_signs.load[width=width](w_idx)
+            var zs_signs = self._zs_signs.load[width=width](w_idx)
 
-            self._xs_signs.store[width=width](w_idx, v_xs_signs ^ v_xs_xt)
-            self._zs_signs.store[width=width](w_idx, v_zs_signs ^ v_zs_xt)
+            # XOR signs
+            self._xs_signs.store[width=width](w_idx, xs_signs ^ xs_xt)
+            self._zs_signs.store[width=width](w_idx, zs_signs ^ zs_xt)
 
         vectorize[vec_body, simd_width](self._xs_signs.n_words)
 
     fn apply_S(mut self, q: Int):
-        # S gate: Z -> Z, X -> Y = iXZ
-        # Update signs: Signs ^= X_col & Z_col
-        # Update ZT: ZT ^= XT
+        # Apply S to qubit q:
+        # Signs ^= (Z_column[q] & X_column[q])
+        # Z_column[q] ^= X_column[q]
+
         @always_inline
         @parameter
         fn vec_body[width: Int](w_idx: Int):
-            var v_xs_xt = self._xs_xt.load_col[width=width](q, w_idx)
-            var v_xs_zt = self._xs_zt.load_col[width=width](q, w_idx)
-            var v_zs_xt = self._zs_xt.load_col[width=width](q, w_idx)
-            var v_zs_zt = self._zs_zt.load_col[width=width](q, w_idx)
+            # Load column words from XS and ZS matrices
+            var xs_xt = self._xs_xt.load_col[width=width](q, w_idx)
+            var xs_zt = self._xs_zt.load_col[width=width](q, w_idx)
+            var zs_xt = self._zs_xt.load_col[width=width](q, w_idx)
+            var zs_zt = self._zs_zt.load_col[width=width](q, w_idx)
 
-            # Update signs if X=1 and Z=1
-            var flip_xs = v_xs_xt & v_xs_zt
-            var flip_zs = v_zs_xt & v_zs_zt
+            # Load signs words
+            var xs_signs = self._xs_signs.load[width=width](w_idx)
+            var zs_signs = self._zs_signs.load[width=width](w_idx)
 
-            var v_xs_signs = self._xs_signs.load[width=width](w_idx)
-            var v_zs_signs = self._zs_signs.load[width=width](w_idx)
-            self._xs_signs.store[width=width](w_idx, v_xs_signs ^ flip_xs)
-            self._zs_signs.store[width=width](w_idx, v_zs_signs ^ flip_zs)
+            # XOR signs
+            self._xs_signs.store[width=width](w_idx, xs_signs ^ (xs_xt & xs_zt))
+            self._zs_signs.store[width=width](w_idx, zs_signs ^ (zs_xt & zs_zt))
 
-            # ZT = ZT ^ XT
-            self._xs_zt.store_col[width=width](q, w_idx, v_xs_zt ^ v_xs_xt)
-            self._zs_zt.store_col[width=width](q, w_idx, v_zs_zt ^ v_zs_xt)
+            # XOR z column
+            self._xs_zt.store_col[width=width](q, w_idx, xs_zt ^ xs_xt)
+            self._zs_zt.store_col[width=width](q, w_idx, zs_zt ^ zs_xt)
 
         vectorize[vec_body, simd_width](self._xs_signs.n_words)
 
     fn apply_S_dag(mut self, q: Int):
-        # S_dag gate: Z -> Z, X -> -Y = -iXZ
-        # Update signs: Signs ^= X_col & ~Z_col
-        # Update ZT: ZT ^= XT
+        # Apply S_dag to qubit q:
+        # Signs ^= (Z_column[q] & ~(X_column[q]))
+        # Z_column[q] ^= X_column[q]
+
         @always_inline
         @parameter
         fn vec_body[width: Int](w_idx: Int):
-            var v_xs_xt = self._xs_xt.load_col[width=width](q, w_idx)
-            var v_xs_zt = self._xs_zt.load_col[width=width](q, w_idx)
-            var v_zs_xt = self._zs_xt.load_col[width=width](q, w_idx)
-            var v_zs_zt = self._zs_zt.load_col[width=width](q, w_idx)
+            # Load column words from XS and ZS matrices
+            var xs_xt = self._xs_xt.load_col[width=width](q, w_idx)
+            var xs_zt = self._xs_zt.load_col[width=width](q, w_idx)
+            var zs_xt = self._zs_xt.load_col[width=width](q, w_idx)
+            var zs_zt = self._zs_zt.load_col[width=width](q, w_idx)
 
-            var flip_xs = v_xs_xt & (~v_xs_zt)
-            var flip_zs = v_zs_xt & (~v_zs_zt)
+            # Load signs words
+            var xs_signs = self._xs_signs.load[width=width](w_idx)
+            var zs_signs = self._zs_signs.load[width=width](w_idx)
 
-            var v_xs_signs = self._xs_signs.load[width=width](w_idx)
-            var v_zs_signs = self._zs_signs.load[width=width](w_idx)
-            self._xs_signs.store[width=width](w_idx, v_xs_signs ^ flip_xs)
-            self._zs_signs.store[width=width](w_idx, v_zs_signs ^ flip_zs)
+            # XOR signs
+            self._xs_signs.store[width=width](
+                w_idx, xs_signs ^ (xs_xt & ~xs_zt)
+            )
+            self._zs_signs.store[width=width](
+                w_idx, zs_signs ^ (zs_xt & ~zs_zt)
+            )
 
-            self._xs_zt.store_col[width=width](q, w_idx, v_xs_zt ^ v_xs_xt)
-            self._zs_zt.store_col[width=width](q, w_idx, v_zs_zt ^ v_zs_xt)
+            # XOR z column
+            self._xs_zt.store_col[width=width](q, w_idx, xs_zt ^ xs_xt)
+            self._zs_zt.store_col[width=width](q, w_idx, zs_zt ^ zs_xt)
 
         vectorize[vec_body, simd_width](self._xs_signs.n_words)
 
     fn apply_CX(mut self, c: Int, t: Int):
-        # CX: X_c -> X_c X_t, Z_t -> Z_c Z_t
-        # XT[t] ^= XT[c]
-        # ZT[c] ^= ZT[t]
-        # Signs update logic matches the scalar loop
+        # Apply CX (CNOT) gate:
+        # c: control, t: target
+        # X_column[t] ^= X_column[c]
+        # Z_column[c] ^= Z_column[t]
+        # Signs ^= X_column[c] & Z_column[t] & (X_column[t] ^ Z_column[c] ^ 1)
+
         @always_inline
         @parameter
         fn vec_body[width: Int](w_idx: Int):
-            # Load columns
-            var xc_xt = self._xs_xt.load_col[width=width](c, w_idx)
-            var zc_zt = self._xs_zt.load_col[width=width](c, w_idx)
-            var xt_xt = self._xs_xt.load_col[width=width](t, w_idx)
-            var zt_zt = self._xs_zt.load_col[width=width](t, w_idx)
+            # Load column words from XS and ZS matrices
+            # control qubit
+            var xs_xt_c = self._xs_xt.load_col[width=width](c, w_idx)
+            var xs_zt_c = self._xs_zt.load_col[width=width](c, w_idx)
+            var zs_xt_c = self._zs_xt.load_col[width=width](c, w_idx)
+            var zs_zt_c = self._zs_zt.load_col[width=width](c, w_idx)
+            # target qubit
+            var xs_xt_t = self._xs_xt.load_col[width=width](t, w_idx)
+            var xs_zt_t = self._xs_zt.load_col[width=width](t, w_idx)
+            var zs_xt_t = self._zs_xt.load_col[width=width](t, w_idx)
+            var zs_zt_t = self._zs_zt.load_col[width=width](t, w_idx)
 
-            # Calculate sign flips: x1 and z2 and not (x2 != z1)
-            # x1=xc_xt, z1=zc_zt, x2=xt_xt, z2=zt_zt
-            var flip_xs = xc_xt & zt_zt & (~(xt_xt ^ zc_zt))
-            var v_xs_signs = self._xs_signs.load[width=width](w_idx)
-            self._xs_signs.store[width=width](w_idx, v_xs_signs ^ flip_xs)
+            # Load signs words
+            var xs_signs = self._xs_signs.load[width=width](w_idx)
+            var zs_signs = self._zs_signs.load[width=width](w_idx)
 
-            # Update columns
-            self._xs_xt.store_col[width=width](t, w_idx, xt_xt ^ xc_xt)
-            self._xs_zt.store_col[width=width](c, w_idx, zc_zt ^ zt_zt)
+            # update signs
+            self._xs_signs.store[width=width](
+                w_idx, xs_signs ^ (xs_xt_c & xs_zt_t & (xs_xt_t ^ xs_zt_c ^ 1))
+            )
+            self._zs_signs.store[width=width](
+                w_idx, zs_signs ^ (zs_xt_c & zs_zt_t & (zs_xt_t ^ zs_zt_c ^ 1))
+            )
 
-            # Same for ZS part
-            var zc_xt = self._zs_xt.load_col[width=width](c, w_idx)
-            var zz_zt = self._zs_zt.load_col[width=width](c, w_idx)
-            var zt_xt = self._zs_xt.load_col[width=width](t, w_idx)
-            var zt_zt_z = self._zs_zt.load_col[width=width](t, w_idx)
+            # update X_column[t]
+            self._xs_xt.store_col[width=width](w_idx, t, xs_xt_t ^ xs_xt_c)
+            self._zs_xt.store_col[width=width](w_idx, t, zs_xt_t ^ zs_xt_c)
 
-            var flip_zs = zc_xt & zt_zt_z & (~(zt_xt ^ zz_zt))
-            var v_zs_signs = self._zs_signs.load[width=width](w_idx)
-            self._zs_signs.store[width=width](w_idx, v_zs_signs ^ flip_zs)
-
-            self._zs_xt.store_col[width=width](t, w_idx, zt_xt ^ zc_xt)
-            self._zs_zt.store_col[width=width](c, w_idx, zz_zt ^ zt_zt_z)
+            # update Z_column[c]
+            self._xs_zt.store_col[width=width](w_idx, c, xs_zt_c ^ xs_zt_t)
+            self._zs_zt.store_col[width=width](w_idx, c, zs_zt_c ^ zs_zt_t)
 
         vectorize[vec_body, simd_width](self._xs_signs.n_words)
 
     fn apply_CZ(mut self, c: Int, t: Int):
-        @always_inline
-        @parameter
-        fn vec_body[width: Int](w_idx: Int):
-            var xc_xt = self._xs_xt.load_col[width=width](c, w_idx)
-            var zc_zt = self._xs_zt.load_col[width=width](c, w_idx)
-            var xt_xt = self._xs_xt.load_col[width=width](t, w_idx)
-            var zt_zt = self._xs_zt.load_col[width=width](t, w_idx)
-
-            var flip_xs = xc_xt & xt_xt & (zc_zt ^ zt_zt)
-            var v_xs_signs = self._xs_signs.load[width=width](w_idx)
-            self._xs_signs.store[width=width](w_idx, v_xs_signs ^ flip_xs)
-
-            self._xs_zt.store_col[width=width](c, w_idx, zc_zt ^ xt_xt)
-            self._xs_zt.store_col[width=width](t, w_idx, zt_zt ^ xc_xt)
-
-            var zc_xt = self._zs_xt.load_col[width=width](c, w_idx)
-            var zz_zt = self._zs_zt.load_col[width=width](c, w_idx)
-            var zt_xt = self._zs_xt.load_col[width=width](t, w_idx)
-            var zt_zt_z = self._zs_zt.load_col[width=width](t, w_idx)
-
-            var flip_zs = zc_xt & zt_xt & (zz_zt ^ zt_zt_z)
-            var v_zs_signs = self._zs_signs.load[width=width](w_idx)
-            self._zs_signs.store[width=width](w_idx, v_zs_signs ^ flip_zs)
-
-            self._zs_zt.store_col[width=width](c, w_idx, zz_zt ^ zt_xt)
-            self._zs_zt.store_col[width=width](t, w_idx, zt_zt_z ^ zc_xt)
-
-        vectorize[vec_body, simd_width](self._xs_signs.n_words)
+        self.apply_hadamard(t)
+        self.apply_CX(c, t)
+        self.apply_hadamard(t)
 
     fn apply_CY(mut self, c: Int, t: Int):
         self.apply_S_dag(t)
