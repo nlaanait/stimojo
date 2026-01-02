@@ -146,8 +146,10 @@ struct BitMatrix(
         # Allocate ptr size with words per col aligned up to simd_width
         self.n_rows = rows
         self.n_cols = cols
-        self.n_words_per_col = (rows + int_bit_width - 1) // int_bit_width
-        var alloc_size = cols * align_up(self.n_words_per_col, simd_width)
+        self.n_words_per_col = align_up(
+            (rows + int_bit_width - 1) // int_bit_width, simd_width
+        )
+        var alloc_size = cols * self.n_words_per_col
 
         var ptr = alloc[Scalar[int_type]](alloc_size)
         memset(ptr=ptr, value=0, count=alloc_size)
@@ -233,14 +235,22 @@ struct BitMatrix(
         self._data[major_idx, word_idx] = word
 
     fn __eq__(self, other: BitMatrix) -> Bool:
-        # TODO: handle case of lhs/rhs with different formats
         if self.n_rows != other.n_rows or self.n_cols != other.n_cols:
             return False
 
-        for c in range(self.n_cols):
-            for w in range(self.n_words_per_col):
-                # if self._data[c, w][0] != other._data[c, w][0]:
-                if self[c, w] != other[c, w]:
+        # If layouts match, we can compare words directly
+        if self.column_major == other.column_major:
+            var major = self.n_cols if self.column_major else self.n_rows
+            for i in range(major):
+                for w in range(self.n_words_per_col):
+                    if self._data[i, w][0] != other._data[i, w][0]:
+                        return False
+            return True
+
+        # Otherwise, logical comparison
+        for r in range(self.n_rows):
+            for c in range(self.n_cols):
+                if self[r, c] != other[r, c]:
                     return False
         return True
 
@@ -260,20 +270,18 @@ struct BitMatrix(
 
     fn transpose(mut self):
         # note: Tableau will always require n_cols = n_rows.
-        # Below treats generals case of n_cols possibly different from n_rows.
+        # Below treats general case of n_cols possibly different from n_rows.
         var current_major = self.n_cols if self.column_major else self.n_rows
         var current_minor = self.n_rows if self.column_major else self.n_cols
 
         # Allocate new data ptr
         var new_major = current_minor
         var new_minor = current_major
-        var new_words_per_major = (
-            new_minor + int_bit_width - 1
-        ) // int_bit_width
-        self.n_words_per_col = new_words_per_major
-        var new_alloc_size = new_major * align_up(
-            new_words_per_major, simd_width
+        var new_words_per_major = align_up(
+            (new_minor + int_bit_width - 1) // int_bit_width, simd_width
         )
+        self.n_words_per_col = new_words_per_major
+        var new_alloc_size = new_major * new_words_per_major
 
         var new_ptr = alloc[Scalar[int_type]](new_alloc_size)
         memset(ptr=new_ptr, value=0, count=new_alloc_size)
@@ -374,46 +382,32 @@ struct BitMatrix(
         self._data.ptr.store(idx, val)
 
     fn swap_rows(mut self, r1: Int, r2: Int):
-        # transpose if not column-
-        if self.column_major:
-            self.transpose()
-
-        # Now in Row-Major, rows are contiguous
         @parameter
-        fn vec_swap[width: Int](w: Int):
-            var val1 = self._data.load[width](Index(r1, w))
-            var val2 = self._data.load[width](Index(r2, w))
-            self._data.store[width](Index(r1, w), val2)
-            self._data.store[width](Index(r2, w), val1)
+        fn vec_body[width: Int](w: Int):
+            var val1 = self.load_row[width](r1, w)
+            var val2 = self.load_row[width](r2, w)
+            self.store_row[width](r1, w, val2)
+            self.store_row[width](r2, w, val1)
 
-        vectorize[vec_swap, simd_width](self.n_words_per_col)
+        vectorize[vec_body, simd_width](self.n_words_per_col)
 
     fn xor_row(mut self, target_row: Int, source_row: Int):
-        if self.column_major:
-            self.transpose()
-
-        # Now in Row-Major, rows are contiguous
         @parameter
-        fn vec_xor[width: Int](w: Int):
-            var val_src = self._data.load[width](Index(source_row, w))
-            var val_tgt = self._data.load[width](Index(target_row, w))
-            self._data.store[width](Index(target_row, w), val_tgt ^ val_src)
+        fn vec_body[width: Int](w: Int):
+            var val_src = self.load_row[width](source_row, w)
+            var val_tgt = self.load_row[width](target_row, w)
+            self.store_row[width](target_row, w, val_tgt ^ val_src)
 
-        vectorize[vec_xor, simd_width](self.n_words_per_col)
+        vectorize[vec_body, simd_width](self.n_words_per_col)
 
-    # target_col ^= source_col
     fn xor_col(mut self, target_col: Int, source_col: Int):
-        if not self.column_major:
-            self.transpose()
-
-        # Now in Col-Major, cols are contiguous
         @parameter
-        fn vec_xor[width: Int](w: Int):
-            var val_src = self._data.load[width](Index(source_col, w))
-            var val_tgt = self._data.load[width](Index(target_col, w))
-            self._data.store[width](Index(target_col, w), val_tgt ^ val_src)
+        fn vec_body[width: Int](w: Int):
+            var val_src = self.load_col[width](source_col, w)
+            var val_tgt = self.load_col[width](target_col, w)
+            self.store_col[width](target_col, w, val_tgt ^ val_src)
 
-        vectorize[vec_xor, simd_width](self.n_words_per_col)
+        vectorize[vec_body, simd_width](self.n_words_per_col)
 
     @always_inline
     fn load_col[
