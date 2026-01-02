@@ -27,7 +27,7 @@ struct BitVector(
         var alloc_size = align_up(self.n_words, simd_width)
 
         var ptr = alloc[Scalar[int_type]](alloc_size)
-        memset(ptr, 0, alloc_size)
+        memset(ptr=ptr, value=0, count=alloc_size)
 
         # Define tensor layout at runtime
         var rt_layout = RuntimeLayout[Self.layout_type].row_major(
@@ -65,7 +65,7 @@ struct BitVector(
         """Fetches bit state stored at index idx."""
         var word_idx = idx >> int_bit_exp  # word = idx // int_bit_width
         var bit_idx = idx & (int_bit_width - 1)  # bit_idx = idx % int_bit_width
-        var word = self._data.ptr.load(word_idx)
+        var word = self._data[word_idx][0]
         return (
             (word >> bit_idx) & Scalar[int_type](1)
         ) == 1  # shift word to index then AND with mask=1
@@ -85,7 +85,7 @@ struct BitVector(
             current_word &= (
                 ~mask
             )  # set bit to 0 at bit_idx via AND with NOT mask
-        self._data.ptr.store(word_idx, current_word)
+        self._data[word_idx] = current_word
 
     fn __eq__(self, other: BitVector) -> Bool:
         if self.n_bits != other.n_bits:
@@ -127,40 +127,47 @@ struct BitVector(
 struct BitMatrix(
     Copyable, EqualityComparable, ImplicitlyCopyable, Movable, Stringable
 ):
-    # Default is Column-Major packed layout
+    """Bit-packed dense Matrix backed with a LayoutTensor.\n
+    Supports runtime transpose+copy to maximize cache locality for column-wide ops and row-wide ops.
+    """
+
+    # Default is Column-Major bit-packed layout
     # Shape is (n_cols, n_words_per_col)
-    # n_words_per_col = ceil(n_rows / 64)
+    # n_words_per_col = ceil(n_rows / int_bit_width)
     comptime layout_type = Layout.col_major(UNKNOWN_VALUE, UNKNOWN_VALUE)
 
     var n_rows: Int
     var n_cols: Int
     var n_words_per_col: Int
     var _data: LayoutTensor[int_type, Self.layout_type, MutOrigin.external]
-    var qubit_layout: Bool
+    var column_major: Bool
 
     fn __init__(out self, rows: Int, cols: Int):
+        # Allocate ptr size with words per col aligned up to simd_width
         self.n_rows = rows
         self.n_cols = cols
         self.n_words_per_col = (rows + int_bit_width - 1) // int_bit_width
-        var alloc_size = cols * self.n_words_per_col
+        var alloc_size = cols * align_up(self.n_words_per_col, simd_width)
 
         var ptr = alloc[Scalar[int_type]](alloc_size)
-        memset(ptr, 0, alloc_size)
+        memset(ptr=ptr, value=0, count=alloc_size)
 
+        # Define Layout at runtime
         var rt_layout = RuntimeLayout[Self.layout_type].col_major(
             Index(cols, self.n_words_per_col)
         )
+        # Initializae tensor with layout + data from ptr
         self._data = LayoutTensor[
             int_type, Self.layout_type, MutOrigin.external
         ](ptr, rt_layout)
-        self.qubit_layout = True
+        self.column_major = True
 
     fn __copyinit__(out self, other: BitMatrix):
         # TODO: handle case of src/target with different memory layouts.
         self.n_rows = other.n_rows
         self.n_cols = other.n_cols
         self.n_words_per_col = other.n_words_per_col
-        self.qubit_layout = other.qubit_layout
+        self.column_major = other.column_major
         var alloc_size = self.n_cols * self.n_words_per_col
 
         var ptr = alloc[Scalar[int_type]](alloc_size)
@@ -179,51 +186,61 @@ struct BitMatrix(
         self.n_cols = other.n_cols
         self.n_words_per_col = other.n_words_per_col
         self._data = other._data
-        self.qubit_layout = other.qubit_layout
+        self.column_major = other.column_major
 
     fn __del__(deinit self):
         if self._data.ptr:
             self._data.ptr.free()
 
     fn __getitem__(self, r: Int, c: Int) -> Bool:
-        # Data is packed along rows (words contain bits for multiple rows of a single column)
-        # _data[c, w]
-        if self.qubit_layout:
-            var w = r >> int_bit_exp
-            var b = r & (int_bit_width - 1)
-            var word = self._data[c, w][0]
-            return ((word >> b) & Scalar[int_type](1)) == 1
+        """Fetches bit state stored at index = (row, col)."""
+        # self._data[r, w]: Data is packed along cols (words contain bits for multiple cols of a single row)
+        # self._data[c,w]: Data is packed along rows (words contain bits for multiple rows of a single column)
+        # Figure out which is the major index and minor index
+        var major_idx = c if self.column_major else r
+        var minor_idx = r if self.column_major else c
 
-        # Data is packed along cols (words contains bits for multiple cols of a single row)
-        # _data[r,w]
-        else:
-            var w = c >> int_bit_exp
-            var b = c & (int_bit_width - 1)
-            var word = self._data[r, w][0]
-            return ((word >> b) & Scalar[int_type](1)) == 1
+        # Locate word, bit indices
+        var word_idx = (
+            minor_idx >> int_bit_exp
+        )  # eq. word = (r or c) // int_bit_width
+        var bit_idx = minor_idx & (
+            int_bit_width - 1
+        )  # bit_idx = idx % int_bit_width
+        var word = self._data[major_idx, word_idx][
+            0
+        ]  # shift word to index then AND with mask=1
+        return ((word >> bit_idx) & Scalar[int_type](1)) == 1
 
     fn __setitem__(mut self, r: Int, c: Int, val: Bool):
-        var major = c if self.qubit_layout else r
-        var minor = r if self.qubit_layout else c
+        # self._data[r, w]: Data is packed along cols (words contain bits for multiple cols of a single row)
+        # self._data[c,w]: Data is packed along rows (words contain bits for multiple rows of a single column)
+        # Figure out which is the major index and minor index
+        var major_idx = c if self.column_major else r
+        var minor_idx = r if self.column_major else c
 
-        var w = minor >> int_bit_exp
-        var b = minor & (int_bit_width - 1)
-        var mask = Scalar[int_type](1) << b
+        var word_idx = minor_idx >> int_bit_exp
+        var bit_idx = minor_idx & (int_bit_width - 1)
+        var mask = (
+            Scalar[int_type](1) << bit_idx
+        )  # mask of 0s except at bit_idx
 
-        var word = self._data[major, w][0]
+        var word = self._data[major_idx, word_idx][0]
         if val:
-            word |= mask
+            word |= mask  # set bit to 1 at bit_idx via OR with mask
         else:
-            word &= ~mask
-        self._data[major, w] = word
+            word &= ~mask  # set bit to 0 at bit_idx via AND with NOT mask
+        self._data[major_idx, word_idx] = word
 
     fn __eq__(self, other: BitMatrix) -> Bool:
+        # TODO: handle case of lhs/rhs with different formats
         if self.n_rows != other.n_rows or self.n_cols != other.n_cols:
             return False
 
         for c in range(self.n_cols):
             for w in range(self.n_words_per_col):
-                if self._data[c, w][0] != other._data[c, w][0]:
+                # if self._data[c, w][0] != other._data[c, w][0]:
+                if self[c, w] != other[c, w]:
                     return False
         return True
 
@@ -242,52 +259,70 @@ struct BitMatrix(
         return s
 
     fn transpose(mut self):
-        var current_major = self.n_cols if self.qubit_layout else self.n_rows
-        var current_minor = self.n_rows if self.qubit_layout else self.n_cols
+        # note: Tableau will always require n_cols = n_rows.
+        # Below treats generals case of n_cols possibly different from n_rows.
+        var current_major = self.n_cols if self.column_major else self.n_rows
+        var current_minor = self.n_rows if self.column_major else self.n_cols
 
+        # Allocate new data ptr
         var new_major = current_minor
         var new_minor = current_major
         var new_words_per_major = (
             new_minor + int_bit_width - 1
         ) // int_bit_width
-        var new_alloc_size = new_major * new_words_per_major
+        self.n_words_per_col = new_words_per_major
+        var new_alloc_size = new_major * align_up(
+            new_words_per_major, simd_width
+        )
 
         var new_ptr = alloc[Scalar[int_type]](new_alloc_size)
-        memset(new_ptr, 0, new_alloc_size)
+        memset(ptr=new_ptr, value=0, count=new_alloc_size)
 
-        for c in range(current_major):
-            for w in range(self.n_words_per_col):
-                var word = self._data[c, w][0]
-                # Iterate bits in the word
-                for b in range(int_bit_width):
-                    var r = (w << int_bit_exp) + b
-                    if r < current_minor:
-                        if ((word >> b) & Scalar[int_type](1)) == 1:
-                            # Set bit at (r, c) in new matrix
-                            var dest_w = c >> int_bit_exp
-                            var dest_b = c & (int_bit_width - 1)
-                            var dest_idx = r * new_words_per_major + dest_w
-                            var val = new_ptr.load(dest_idx)
+        # Iterate over major axis
+        for major_idx in range(current_major):
+            # Iterate over words at a major index
+            for word_idx in range(self.n_words_per_col):
+                var word = self._data[major_idx, word_idx][0]
+                # Iterate over bits in the word
+                for bit_idx in range(int_bit_width):
+                    # find the minor index of the current bit
+                    var minor_idx = (
+                        word_idx << int_bit_exp
+                    ) + bit_idx  # eq. minor_idx = word_idx * int_bit_width + bit_idx
+                    # bound check to ensure the bit at minor_idx isnt' a padding bit
+                    if minor_idx < current_minor:
+                        if ((word >> bit_idx) & Scalar[int_type](1)) == 1:
+                            # take bit from (major_idx, word_idx) and store it at
+                            # (minor_idx, dest_word_idx) in new ptr
+                            var dest_word_idx = major_idx >> int_bit_exp
+                            var dest_bit_idx = major_idx & (int_bit_width - 1)
+                            var dest_ptr_idx = (
+                                minor_idx * new_words_per_major + dest_word_idx
+                            )
+                            var val = new_ptr.load(dest_ptr_idx)
                             new_ptr.store(
-                                dest_idx, val | (Scalar[int_type](1) << dest_b)
+                                dest_ptr_idx,
+                                val | (Scalar[int_type](1) << dest_bit_idx),
                             )
 
-        if self._data.ptr:
-            self._data.ptr.destroy_pointee()
-            self._data.ptr.free()
-
-        self.qubit_layout = not self.qubit_layout
-        self.n_words_per_col = new_words_per_major
-
-        var rt_layout = RuntimeLayout[Self.layout_type].row_major(
-            Index(new_major, new_words_per_major)
+        # Initialize transposed LayoutTensor
+        var rt_layout = (
+            RuntimeLayout[Self.layout_type]
+            .row_major(
+                Index(new_major, new_words_per_major)
+            ) if self.column_major else RuntimeLayout[Self.layout_type]
+            .col_major(Index(new_major, new_words_per_major))
         )
+
         self._data = LayoutTensor[
             int_type, Self.layout_type, MutOrigin.external
         ](new_ptr, rt_layout)
 
+        # flip layout indicator
+        self.column_major = not self.column_major
+
     fn is_zero(self) -> Bool:
-        var major = self.n_cols if self.qubit_layout else self.n_rows
+        var major = self.n_cols if self.column_major else self.n_rows
         var total_words = major * self.n_words_per_col
         var ptr = self.unsafe_ptr()
         var has_non_zero = False
@@ -309,27 +344,21 @@ struct BitMatrix(
 
         var all_good = True
 
-        var major = self.n_cols if self.qubit_layout else self.n_rows
-        # Check diagonal
+        var major = self.n_cols if self.column_major else self.n_rows
         for i in range(major):
             if not all_good:
                 break
-
-            # We want M[r, r] == 1 for all r.
-            # In our layout, M[r, c] is bit r of column c.
-            # So for column c, we expect bit c to be 1, and all others 0.
-
-            var diag_w = i >> int_bit_exp
-            var diag_b = i & (int_bit_width - 1)
-            var expected_diag = Scalar[int_type](1) << diag_b
-
-            for w in range(self.n_words_per_col):
-                var val = self._data[i, w][0]
-                var expected = expected_diag if w == diag_w else 0
-                if val != expected:
-                    all_good = False
+            for j in range(major):
+                if not all_good:
                     break
-
+                if i == j:
+                    if not self[i, j]:
+                        all_good = False
+                        break
+                else:
+                    if self[i, j]:
+                        all_good = False
+                        break
         return all_good
 
     fn unsafe_ptr(self) -> UnsafePointer[Scalar[int_type], MutOrigin.external]:
@@ -346,7 +375,7 @@ struct BitMatrix(
 
     fn swap_rows(mut self, r1: Int, r2: Int):
         # transpose if not column-
-        if self.qubit_layout:
+        if self.column_major:
             self.transpose()
 
         # Now in Row-Major, rows are contiguous
@@ -360,7 +389,7 @@ struct BitMatrix(
         vectorize[vec_swap, simd_width](self.n_words_per_col)
 
     fn xor_row(mut self, target_row: Int, source_row: Int):
-        if self.qubit_layout:
+        if self.column_major:
             self.transpose()
 
         # Now in Row-Major, rows are contiguous
@@ -374,7 +403,7 @@ struct BitMatrix(
 
     # target_col ^= source_col
     fn xor_col(mut self, target_col: Int, source_col: Int):
-        if not self.qubit_layout:
+        if not self.column_major:
             self.transpose()
 
         # Now in Col-Major, cols are contiguous
@@ -390,7 +419,7 @@ struct BitMatrix(
     fn load_col[
         width: Int
     ](mut self, col: Int, w_idx: Int) -> SIMD[int_type, width]:
-        if not self.qubit_layout:
+        if not self.column_major:
             self.transpose()
         return self._data.load[width](Index(col, w_idx))
 
@@ -398,7 +427,7 @@ struct BitMatrix(
     fn store_col[
         width: Int
     ](mut self, col: Int, w_idx: Int, val: SIMD[int_type, width]):
-        if not self.qubit_layout:
+        if not self.column_major:
             self.transpose()
         self._data.store[width](Index(col, w_idx), val)
 
@@ -406,7 +435,7 @@ struct BitMatrix(
     fn load_row[
         width: Int
     ](mut self, row: Int, w_idx: Int) -> SIMD[int_type, width]:
-        if self.qubit_layout:
+        if self.column_major:
             self.transpose()
         return self._data.load[width](Index(row, w_idx))
 
@@ -414,6 +443,6 @@ struct BitMatrix(
     fn store_row[
         width: Int
     ](mut self, row: Int, w_idx: Int, val: SIMD[int_type, width]):
-        if self.qubit_layout:
+        if self.column_major:
             self.transpose()
         self._data.store[width](Index(row, w_idx), val)
