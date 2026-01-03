@@ -4,7 +4,7 @@ from utils import Index
 from math import align_up, log2
 from sys import simd_width_of, bit_width_of
 from algorithm import vectorize
-from sys.param_env import env_get_dtype
+from random import randint, seed
 
 from . import int_type, int_bit_exp, int_bit_width, simd_width
 
@@ -147,6 +147,7 @@ struct BitMatrix(
     var n_words_per_col: Int
     var _data: LayoutTensor[int_type, Self.layout_type, MutOrigin.external]
     var column_major: Bool
+    var size: Int
 
     fn __init__(out self, rows: Int, cols: Int):
         # Allocate ptr size with words per column aligned up to simd_width
@@ -155,10 +156,10 @@ struct BitMatrix(
         self.n_words_per_col = align_up(
             (rows + int_bit_width - 1) // int_bit_width, simd_width
         )
-        var alloc_size = cols * self.n_words_per_col
+        self.size = cols * self.n_words_per_col
 
-        var ptr = alloc[Scalar[int_type]](alloc_size)
-        memset(ptr=ptr, value=0, count=alloc_size)
+        var ptr = alloc[Scalar[int_type]](self.size)
+        memset(ptr=ptr, value=0, count=self.size)
 
         # Define Layout at runtime
         # Use row_major to ensure words in a column are contiguous
@@ -177,14 +178,14 @@ struct BitMatrix(
         self.n_cols = other.n_cols
         self.n_words_per_col = other.n_words_per_col
         self.column_major = other.column_major
-        var alloc_size = self.n_cols * self.n_words_per_col
+        self.size = other.size
 
-        var ptr = alloc[Scalar[int_type]](alloc_size)
+        var ptr = alloc[Scalar[int_type]](self.size)
         var rt_layout = RuntimeLayout[Self.layout_type].row_major(
             Index(self.n_cols, self.n_words_per_col)
         )
 
-        memcpy(dest=ptr, src=other._data.ptr, count=alloc_size)
+        memcpy(dest=ptr, src=other._data.ptr, count=self.size)
 
         self._data = LayoutTensor[
             int_type, Self.layout_type, MutOrigin.external
@@ -194,6 +195,7 @@ struct BitMatrix(
         self.n_rows = other.n_rows
         self.n_cols = other.n_cols
         self.n_words_per_col = other.n_words_per_col
+        self.size = other.size
         self._data = other._data
         self.column_major = other.column_major
 
@@ -275,6 +277,15 @@ struct BitMatrix(
             s += "\n"
         return s
 
+    fn random(mut self):
+        seed()
+        randint[int_type](
+            self.unsafe_ptr(),
+            self.size,
+            int_bit_width,
+            2**int_bit_width,
+        )
+
     fn transpose(mut self):
         # note: Tableau will always initialize BitMatrix with n_cols = n_rows.
         # Below treats general case of n_cols possibly different from n_rows.
@@ -288,10 +299,10 @@ struct BitMatrix(
             (new_minor + int_bit_width - 1) // int_bit_width, simd_width
         )
         self.n_words_per_col = new_words_per_major
-        var new_alloc_size = new_major * new_words_per_major
+        self.size = new_major * new_words_per_major
 
-        var new_ptr = alloc[Scalar[int_type]](new_alloc_size)
-        memset(ptr=new_ptr, value=0, count=new_alloc_size)
+        var new_ptr = alloc[Scalar[int_type]](self.size)
+        memset(ptr=new_ptr, value=0, count=self.size)
 
         # Iterate over major axis
         for major_idx in range(current_major):
@@ -357,12 +368,12 @@ struct BitMatrix(
         # Access raw data directly to avoid transpose overhead if possible
         # Logic is symmetric for row-major vs col-major
         var major = self.n_cols if self.column_major else self.n_rows
-        
+
         for major_idx in range(major):
             # For identity, we want (i, i) to be 1, all else 0.
             # In data storage (major, minor_words), we are looking at major index 'i'.
             # The minor bit index corresponding to the diagonal is also 'i'.
-            
+
             var target_word_idx = major_idx >> int_bit_exp
             var target_bit_idx = major_idx & (int_bit_width - 1)
             var target_mask = Scalar[int_type](1) << target_bit_idx
