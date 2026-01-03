@@ -6,6 +6,7 @@ version = "0.1.0"
 
 [tasks]
 benchmarks = "./scripts/mojo_wrap.sh run benchmarks/run_all_benchmarks.mojo"
+benchmark_bit_matrix = "./scripts/mojo_wrap.sh run benchmarks/bit_matrix_benchmark.mojo"
 build = "./scripts/mojo_wrap.sh build benchmarks/run_all_benchmarks.mojo"
 example_pauli_string = "./scripts/mojo_wrap.sh run examples/pauli_string.mojo"
 example_tableau = "./scripts/mojo_wrap.sh run examples/tableau.mojo"

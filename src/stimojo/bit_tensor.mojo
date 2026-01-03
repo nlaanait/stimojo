@@ -128,13 +128,19 @@ struct BitMatrix(
     Copyable, EqualityComparable, ImplicitlyCopyable, Movable, Stringable
 ):
     """Bit-packed dense Matrix backed with a LayoutTensor.\n
-    Supports runtime transpose+copy to maximize cache locality for column-wide ops and row-wide ops.
+    Features:
+    1. At runtime transpose+copy mutation of the internal data is done to maximize cache locality
+    for column-wide ops and row-wide ops.
+    2. High-level read+write via BitMatrix[i,j] and SIMD via BitMatrix.load_col/load_row.
+    3. Efficient Vectorized Ops: swap (rows, cols), xor (rows, cols), is_zero, is_identity
+
     """
 
-    # Default is Column-Major bit-packed layout
-    # Shape is (n_cols, n_words_per_col)
+    # Default is Column-Major bit-packed initialization
+    # Shape at runtime will be (n_cols, n_words_per_col)
     # n_words_per_col = ceil(n_rows / int_bit_width)
-    comptime layout_type = Layout.col_major(UNKNOWN_VALUE, UNKNOWN_VALUE)
+    # We use row_major layout for the (Major, Words) tensor so that Words are contiguous.
+    comptime layout_type = Layout.row_major(UNKNOWN_VALUE, UNKNOWN_VALUE)
 
     var n_rows: Int
     var n_cols: Int
@@ -143,7 +149,7 @@ struct BitMatrix(
     var column_major: Bool
 
     fn __init__(out self, rows: Int, cols: Int):
-        # Allocate ptr size with words per col aligned up to simd_width
+        # Allocate ptr size with words per column aligned up to simd_width
         self.n_rows = rows
         self.n_cols = cols
         self.n_words_per_col = align_up(
@@ -155,7 +161,8 @@ struct BitMatrix(
         memset(ptr=ptr, value=0, count=alloc_size)
 
         # Define Layout at runtime
-        var rt_layout = RuntimeLayout[Self.layout_type].col_major(
+        # Use row_major to ensure words in a column are contiguous
+        var rt_layout = RuntimeLayout[Self.layout_type].row_major(
             Index(cols, self.n_words_per_col)
         )
         # Initializae tensor with layout + data from ptr
@@ -173,7 +180,7 @@ struct BitMatrix(
         var alloc_size = self.n_cols * self.n_words_per_col
 
         var ptr = alloc[Scalar[int_type]](alloc_size)
-        var rt_layout = RuntimeLayout[Self.layout_type].col_major(
+        var rt_layout = RuntimeLayout[Self.layout_type].row_major(
             Index(self.n_cols, self.n_words_per_col)
         )
 
@@ -269,7 +276,7 @@ struct BitMatrix(
         return s
 
     fn transpose(mut self):
-        # note: Tableau will always require n_cols = n_rows.
+        # note: Tableau will always initialize BitMatrix with n_cols = n_rows.
         # Below treats general case of n_cols possibly different from n_rows.
         var current_major = self.n_cols if self.column_major else self.n_rows
         var current_minor = self.n_rows if self.column_major else self.n_cols
@@ -297,7 +304,7 @@ struct BitMatrix(
                     var minor_idx = (
                         word_idx << int_bit_exp
                     ) + bit_idx  # eq. minor_idx = word_idx * int_bit_width + bit_idx
-                    # bound check to ensure the bit at minor_idx isnt' a padding bit
+                    # bound check to ensure the bit at minor_idx isn't a padding bit
                     if minor_idx < current_minor:
                         if ((word >> bit_idx) & Scalar[int_type](1)) == 1:
                             # take bit from (major_idx, word_idx) and store it at
@@ -314,16 +321,13 @@ struct BitMatrix(
                             )
 
         # Initialize transposed LayoutTensor
-        var rt_layout = (
-            RuntimeLayout[Self.layout_type]
-            .row_major(
-                Index(new_major, new_words_per_major)
-            ) if self.column_major else RuntimeLayout[Self.layout_type]
-            .col_major(Index(new_major, new_words_per_major))
+        # Always use row_major so words are contiguous
+        var rt_layout = RuntimeLayout[self.layout_type].row_major(
+            Index(new_major, new_words_per_major)
         )
 
         self._data = LayoutTensor[
-            int_type, Self.layout_type, MutOrigin.external
+            int_type, self.layout_type, MutOrigin.external
         ](new_ptr, rt_layout)
 
         # flip layout indicator
@@ -350,36 +354,41 @@ struct BitMatrix(
         if self.n_rows != self.n_cols:
             return False
 
-        var all_good = True
-
+        # Access raw data directly to avoid transpose overhead if possible
+        # Logic is symmetric for row-major vs col-major
         var major = self.n_cols if self.column_major else self.n_rows
-        for i in range(major):
-            if not all_good:
-                break
-            for j in range(major):
-                if not all_good:
-                    break
-                if i == j:
-                    if not self[i, j]:
-                        all_good = False
-                        break
+        
+        for major_idx in range(major):
+            # For identity, we want (i, i) to be 1, all else 0.
+            # In data storage (major, minor_words), we are looking at major index 'i'.
+            # The minor bit index corresponding to the diagonal is also 'i'.
+            
+            var target_word_idx = major_idx >> int_bit_exp
+            var target_bit_idx = major_idx & (int_bit_width - 1)
+            var target_mask = Scalar[int_type](1) << target_bit_idx
+
+            for w in range(self.n_words_per_col):
+                var word = self._data[major_idx, w][0]
+                if w == target_word_idx:
+                    if word != target_mask:
+                        return False
                 else:
-                    if self[i, j]:
-                        all_good = False
-                        break
-        return all_good
+                    if word != 0:
+                        return False
+        return True
 
     fn unsafe_ptr(self) -> UnsafePointer[Scalar[int_type], MutOrigin.external]:
         return self._data.ptr
 
-    # Access words of a column
-    fn col_word(self, c: Int, w: Int) -> Scalar[int_type]:
-        var idx = c * self.n_words_per_col + w
-        return self._data.ptr.load(idx)
+    fn swap_cols(mut self, c1: Int, c2: Int):
+        @parameter
+        fn vec_body[width: Int](w: Int):
+            var val1 = self.load_col[width](c1, w)
+            var val2 = self.load_col[width](c2, w)
+            self.store_col[width](c1, w, val2)
+            self.store_col[width](c2, w, val1)
 
-    fn set_col_word(mut self, c: Int, w: Int, val: Scalar[int_type]):
-        var idx = c * self.n_words_per_col + w
-        self._data.ptr.store(idx, val)
+        vectorize[vec_body, simd_width](self.n_words_per_col)
 
     fn swap_rows(mut self, r1: Int, r2: Int):
         @parameter
